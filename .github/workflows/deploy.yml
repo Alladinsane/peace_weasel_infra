@@ -1,0 +1,75 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy"
+        required: true
+        type: choice
+        options: [dev, prod]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # GitHub Environments give per-environment DB creds/PHP version + optional
+    # required reviewers on prod, at no cost on a public repo. SSH connection
+    # details are repo-level secrets since dev and prod share ONE host.
+    environment: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            TARGET_ENV="${{ github.event.inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}"
+            cd /opt/wp-stack
+            git fetch origin
+            git checkout ${{ github.ref_name }}
+            git pull origin ${{ github.ref_name }}
+
+            # Shared file: written every deploy, same content regardless of
+            # which environment triggered it (both PHP_VERSION_* must coexist).
+            cat > docker/.env << ENVEOF
+            PHP_VERSION_PROD=${{ vars.PHP_VERSION_PROD }}
+            PHP_VERSION_DEV=${{ vars.PHP_VERSION_DEV }}
+            NGINX_ADMIN_IP=${{ secrets.NGINX_ADMIN_IP }}
+            OCI_BACKUP_BUCKET=${{ secrets.OCI_BACKUP_BUCKET }}
+            PROD_HOST=${{ vars.PROD_HOST }}
+            DEV_HOST=${{ vars.DEV_HOST }}
+            ENVEOF
+
+            mkdir -p docker/nginx/certs
+            echo "${{ secrets.CF_ORIGIN_CERT }}" > docker/nginx/certs/cloudflare-origin.pem
+            echo "${{ secrets.CF_ORIGIN_KEY }}"  > docker/nginx/certs/cloudflare-origin.key
+            chmod 600 docker/nginx/certs/cloudflare-origin.key
+
+            # Only this environment's own file, from THIS GitHub Environment's
+            # secrets — never touches the other environment's DB/PHP version.
+            cat > docker/$TARGET_ENV.env << ENVEOF
+            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+            MYSQL_USER=${{ secrets.MYSQL_USER }}
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            WORDPRESS_DB_HOST=db-$TARGET_ENV
+            WORDPRESS_DB_NAME=${{ secrets.MYSQL_DATABASE }}
+            WORDPRESS_DB_USER=${{ secrets.MYSQL_USER }}
+            WORDPRESS_DB_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            WORDPRESS_TABLE_PREFIX=${{ secrets.WORDPRESS_TABLE_PREFIX }}
+            ENVEOF
+
+            cd docker
+            # Only build/(re)start THIS environment's containers.
+            docker compose --profile "$TARGET_ENV" build php-$TARGET_ENV
+            docker compose --profile "$TARGET_ENV" up -d db-$TARGET_ENV php-$TARGET_ENV
+
+            # Nginx resolves each PHP service at request time, so it can
+            # continue serving one environment while the other is stopped.
+            docker compose --profile edge up -d nginx
+
+            docker compose --profile "$TARGET_ENV" exec -T php-$TARGET_ENV wp cache flush --allow-root || true

@@ -17,8 +17,8 @@ terraform {
 }
 
 # CLOUDFLARE_API_TOKEN is read from the environment — never put it in a
-# .tfvars file. Scope the token to Zone:DNS:Edit + Zone:Firewall Services:Edit
-# for this zone only.
+# .tfvars file. Scope the token to Zone:DNS:Edit, Zone:Firewall Services:Edit,
+# and Zone:Zone Settings:Edit for this zone only.
 provider "cloudflare" {}
 
 variable "zone_id" {

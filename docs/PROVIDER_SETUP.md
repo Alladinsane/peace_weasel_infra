@@ -1,0 +1,123 @@
+# First-time OCI and Cloudflare setup
+
+This project uses three separate credentials. Keep each credential in its
+intended location; none belongs in Git.
+
+| Purpose | Credential | Where it is used |
+|---|---|---|
+| Provision OCI resources | OCI API signing key | `terraform/oci` provider |
+| Store Terraform state | OCI customer secret key / auth token | Terraform S3 backend |
+| Manage DNS and WAF | Cloudflare API token | `terraform/cloudflare` provider |
+
+## 1. Create OCI credentials
+
+1. In the OCI Console, note your tenancy OCID, your user OCID, and the OCID
+   of the compartment where this stack will live. They are available from
+   **Profile** and **Identity & Security > Compartments**.
+2. Generate an RSA API signing key locally and protect it with a passphrase:
+   ```sh
+   mkdir -p ~/.oci
+   openssl genrsa -out ~/.oci/oci_api_key.pem 2048
+   openssl rsa -pubout -in ~/.oci/oci_api_key.pem -out ~/.oci/oci_api_key_public.pem
+   ```
+3. In **Profile > User settings > API keys**, add the public key. OCI shows
+   the fingerprint; copy it into `terraform/oci/terraform.tfvars`.
+4. In **Profile > User settings > Customer secret keys**, generate a key and
+   save its access key ID and secret immediately. Export them only in the
+   shell where Terraform runs:
+   ```sh
+   export AWS_ACCESS_KEY_ID='your-oci-customer-secret-access-key-id'
+   export AWS_SECRET_ACCESS_KEY='your-oci-customer-secret-key'
+   ```
+
+Your OCI user needs permission to manage the resources declared by this
+stack in its target compartment, plus Object Storage access to the state
+bucket. Start with a dedicated user or group rather than an administrator
+account. OCI tenancy policies vary, so have a tenancy administrator grant
+the least permissions needed for Compute, Networking, and Object Storage.
+
+## 2. Bootstrap remote Terraform state
+
+Terraform cannot create the bucket that holds its own first state file.
+In **OCI Console > Object Storage & Archive Storage > Buckets**, select the
+same region as `terraform/oci/terraform.tfvars` and create a Standard bucket
+named `wp-terraform-state`. Do not make it public.
+
+Find the Object Storage namespace in the bucket details or **Tenancy details**.
+Then create the local backend files:
+
+```sh
+cd terraform/oci
+cp state.backend.hcl.example state.backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+
+cd ../cloudflare
+cp state.backend.hcl.example state.backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+```
+
+In both `state.backend.hcl` files, replace `<object-storage-namespace>` and
+use the OCI region that you selected. Leave the two different `key` values in
+place: they prevent the OCI and Cloudflare stacks from overwriting each other.
+
+Fill the OCI `terraform.tfvars` values from step 1. Use an existing SSH public
+key for `ssh_public_key`, set `admin_ssh_cidr` to your current public IP with
+`/32`, and point `git_repo_url` at your fork.
+
+## 3. Create a scoped Cloudflare token
+
+1. Add your domain as a Cloudflare zone and change its registrar nameservers
+   to the two names Cloudflare assigns. Wait until the zone status is active.
+2. Go to **My Profile > API Tokens > Create Token > Create Custom Token**.
+3. Grant **Zone > DNS > Edit**, **Zone > Firewall Services > Edit**, and
+   **Zone > Zone Settings > Edit**. Scope all permissions to only this zone.
+   The Zone Settings permission enables Cloudflare Free Bot Fight Mode. Create
+   the token and export it:
+   ```sh
+   export CLOUDFLARE_API_TOKEN='your-cloudflare-api-token'
+   ```
+4. Find the zone ID in the zone's Overview page and put it in
+   `terraform/cloudflare/terraform.tfvars`. Choose the production and dev
+   labels (for example `shop` and `dev`) and set `admin_ip` to your public IP.
+
+## 4. Apply in dependency order
+
+Run the OCI stack first, review the plan, then apply it:
+
+```sh
+cd terraform/oci
+terraform init -backend-config=state.backend.hcl
+terraform plan
+terraform apply
+terraform output -raw instance_public_ip
+```
+
+Put that output into `terraform/cloudflare/terraform.tfvars` as `origin_ip`.
+Then apply the Cloudflare stack:
+
+```sh
+cd ../cloudflare
+terraform init -backend-config=state.backend.hcl
+terraform plan
+terraform apply
+```
+
+Terraform will create the backups bucket; only the state bucket is created
+manually. Continue with the Origin CA certificate and GitHub Environment
+configuration in `docs/SECRETS.md` before the first deployment.
+
+Each `dev` or `prod` deployment can run by itself. It starts that
+environment's database and PHP containers plus the shared nginx edge. You can
+later stop either isolated stack without interrupting the other; its hostname
+will return a 502 response until that stack is started again.
+
+To pause one environment after both are deployed, SSH to the instance and run:
+
+```sh
+cd /opt/wp-stack/docker
+docker compose --profile dev stop
+```
+
+This leaves `prod` and nginx running. Substitute `prod` to pause production.
+Restart an environment with `docker compose --profile dev up -d`; its named
+database and WordPress volumes are preserved while it is stopped.

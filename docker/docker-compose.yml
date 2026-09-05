@@ -1,0 +1,98 @@
+services:
+  # ---- PROD: fully independent DB + PHP, own volumes ----
+  db-prod:
+    image: mariadb:11
+    restart: unless-stopped
+    profiles: ["prod"]
+    env_file: prod.env
+    volumes:
+      - db_data_prod:/var/lib/mysql
+    networks: [wpnet]
+
+  php-prod:
+    build:
+      context: ./php
+      args:
+        PHP_VERSION: ${PHP_VERSION_PROD}
+    restart: unless-stopped
+    profiles: ["prod"]
+    env_file: prod.env
+    volumes:
+      - wp_data_prod:/var/www/html
+    depends_on: [db-prod]
+    networks: [wpnet]
+
+  # ---- DEV: separate DB + PHP + volumes — a plugin, WP core bump, or PHP
+  # version change here cannot touch prod's database or files at all ----
+  db-dev:
+    image: mariadb:11
+    restart: unless-stopped
+    profiles: ["dev"]
+    env_file: dev.env
+    volumes:
+      - db_data_dev:/var/lib/mysql
+    networks: [wpnet]
+
+  php-dev:
+    build:
+      context: ./php
+      args:
+        PHP_VERSION: ${PHP_VERSION_DEV}
+    restart: unless-stopped
+    profiles: ["dev"]
+    env_file: dev.env
+    volumes:
+      - wp_data_dev:/var/www/html
+    depends_on: [db-dev]
+    networks: [wpnet]
+
+  # ---- Shared edge: the only component that MUST be shared, since only one
+  # process can bind 80/443 on the host. Routes by Host header to the right
+  # upstream. Deploying dev or prod independently never has to touch this
+  # container unless PROD_HOST/DEV_HOST/NGINX_ADMIN_IP themselves change. ----
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    profiles: ["edge"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      NGINX_ADMIN_IP: ${NGINX_ADMIN_IP}
+      PROD_HOST: ${PROD_HOST}
+      DEV_HOST: ${DEV_HOST}
+    volumes:
+      - wp_data_prod:/var/www/prod:ro
+      - wp_data_dev:/var/www/dev:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      # One Cloudflare Origin CA cert covering both hostnames (or a wildcard)
+      # for Full (Strict) mode — see docs/SECRETS.md.
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks: [wpnet]
+
+  # Backup runner, invoked per-environment: which DB host / webroot / bucket
+  # prefix it targets is passed as env vars at `docker compose run` time by
+  # backup.yml (using prod.env or dev.env's DB creds) — this service
+  # definition itself is environment-agnostic.
+  backup:
+    build:
+      context: ../scripts
+      dockerfile: Dockerfile.backup
+    profiles: ["tools"]
+    volumes:
+      # Read-write: restore.sh needs to overwrite wp-content. Only ever runs
+      # on-demand (profile "tools"), never alongside a live deploy, so this
+      # isn't a concurrency risk in practice.
+      - wp_data_prod:/var/www/prod
+      - wp_data_dev:/var/www/dev
+    networks: [wpnet]
+
+networks:
+  wpnet:
+
+volumes:
+  db_data_prod:
+  wp_data_prod:
+  db_data_dev:
+  wp_data_dev:

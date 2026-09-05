@@ -1,0 +1,53 @@
+name: Restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to restore into"
+        required: true
+        type: choice
+        options: [dev, prod]
+      restore_stamp:
+        description: "Backup timestamp, e.g. 20260101-120000 (see Object Storage bucket listing under dev/ or prod/)"
+        required: true
+        type: string
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Confirm this is intentional
+        run: |
+          echo "::warning::Restoring ${{ github.event.inputs.environment }} from ${{ github.event.inputs.restore_stamp }}. This overwrites that environment's current DB + wp-content."
+      - name: Run restore over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            TARGET_ENV="${{ github.event.inputs.environment }}"
+            cd /opt/wp-stack/docker
+            mkdir -p ~/.oci
+            echo "${{ secrets.OCI_CLI_CONFIG }}" > ~/.oci/config
+            echo "${{ secrets.OCI_CLI_KEY }}" > ~/.oci/oci_api_key.pem
+            chmod 600 ~/.oci/oci_api_key.pem
+
+            source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' "$TARGET_ENV.env")
+            source <(grep OCI_BACKUP_BUCKET .env)
+
+            docker compose --profile tools run --rm \
+              --entrypoint /restore.sh \
+              -v ~/.oci:/root/.oci:ro \
+              -e MYSQL_USER="$MYSQL_USER" \
+              -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+              -e MYSQL_DATABASE="$MYSQL_DATABASE" \
+              -e MYSQL_HOST="db-$TARGET_ENV" \
+              -e WP_CONTENT_PATH="/var/www/$TARGET_ENV/wp-content" \
+              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
+              -e OCI_BACKUP_PREFIX="$TARGET_ENV" \
+              -e RESTORE_STAMP="${{ github.event.inputs.restore_stamp }}" \
+              backup

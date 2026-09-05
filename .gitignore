@@ -1,0 +1,21 @@
+# Terraform
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.backend.hcl
+
+# Secrets / keys / certs
+.env
+docker/.env
+docker/prod.env
+docker/dev.env
+*.pem
+*.key
+.oci/
+
+# OS/editor cruft
+.DS_Store
+*.swp
