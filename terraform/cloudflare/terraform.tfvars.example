@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (gitignored). CLOUDFLARE_API_TOKEN stays an env var.
+zone_id        = "your_cloudflare_zone_id"
+prod_subdomain = "shop"   # shop.example.com
+dev_subdomain  = "dev"    # dev.shop.example.com
+origin_ip      = "0.0.0.0" # fill from `terraform output` in terraform/oci
+admin_ip       = "203.0.113.4"

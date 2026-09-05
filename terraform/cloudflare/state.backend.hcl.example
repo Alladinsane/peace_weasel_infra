@@ -1,0 +1,9 @@
+# Copy to state.backend.hcl (gitignored). This must use the same OCI bucket
+# and S3-compatible endpoint as terraform/oci, with a distinct state key.
+# Terraform reads AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the
+# environment; do not put them here.
+bucket                      = "wp-terraform-state"
+key                         = "cloudflare/terraform.tfstate"
+region                      = "us-ashburn-1"
+endpoints                   = { s3 = "https://<object-storage-namespace>.compat.objectstorage.us-ashburn-1.oraclecloud.com" }
+skip_requesting_account_id  = true
