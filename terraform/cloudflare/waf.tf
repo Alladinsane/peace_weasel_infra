@@ -17,29 +17,33 @@ resource "cloudflare_ruleset" "wp_custom_waf" {
       action      = "block"
       enabled     = true
     },
+
     {
       description = "Block common WP recon/exploit paths not otherwise in use"
       expression  = "http.request.uri.path contains \"/xmlrpc.php\" or http.request.uri.path contains \"/wp-config.php\" or http.request.uri.path contains \"/.env\""
       action      = "block"
       enabled     = true
     },
+
     {
       description = "Block PHP execution attempts from WordPress uploads"
       expression  = "starts_with(lower(http.request.uri.path), \"/wp-content/uploads/\") and ends_with(lower(http.request.uri.path), \".php\")"
       action      = "block"
       enabled     = true
     },
+
     {
       description = "Block unusual HTTP methods not used by WordPress"
       expression  = "http.request.method in {\"CONNECT\" \"TRACE\" \"TRACK\"}"
       action      = "block"
       enabled     = true
     },
+
     {
       description = "Block public WordPress user enumeration"
       expression  = "http.request.uri.query contains \"author=\" or http.request.uri.path contains \"/wp-json/wp/v2/users\""
       action      = "block"
       enabled     = true
-    },
+    }
   ]
 }

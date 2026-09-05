@@ -70,9 +70,9 @@ key for `ssh_public_key`, set `admin_ssh_cidr` to your current public IP with
    to the two names Cloudflare assigns. Wait until the zone status is active.
 2. Go to **My Profile > API Tokens > Create Token > Create Custom Token**.
 3. Grant **Zone > DNS > Edit**, **Zone > Firewall Services > Edit**, and
-   **Zone > Zone Settings > Edit**. Scope all permissions to only this zone.
-   The Zone Settings permission enables Cloudflare Free Bot Fight Mode. Create
-   the token and export it:
+   **Zone > Bot Management > Edit**. Scope all permissions to only this zone.
+   The Bot Management permission enables Cloudflare Free Bot Fight Mode.
+   Create the token and export it:
    ```sh
    export CLOUDFLARE_API_TOKEN='your-cloudflare-api-token'
    ```
