@@ -50,6 +50,7 @@ runcmd:
   # --- Pull the repo that defines the environment running on this host ---
   - mkdir -p /opt/wp-stack
   - git clone --branch ${git_repo_branch} ${git_repo_url} /opt/wp-stack
+  - chown -R ubuntu:ubuntu /opt/wp-stack
 
   # Actual containers/secrets are populated by the deploy.yml GitHub Actions
   # workflow over SSH for this host — cloud-init

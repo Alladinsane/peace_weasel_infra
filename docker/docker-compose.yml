@@ -27,7 +27,7 @@ services:
     build:
       context: ./php
       args:
-        PHP_VERSION: ${PHP_VERSION_PROD}
+        PHP_VERSION: ${PHP_VERSION_PROD:-8.3}
     restart: unless-stopped
     profiles: ["prod"]
     deploy:
@@ -79,7 +79,7 @@ services:
     build:
       context: ./php
       args:
-        PHP_VERSION: ${PHP_VERSION_DEV}
+        PHP_VERSION: ${PHP_VERSION_DEV:-8.3}
     restart: unless-stopped
     profiles: ["dev"]
     deploy:

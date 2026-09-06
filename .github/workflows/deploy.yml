@@ -24,8 +24,8 @@ jobs:
         env:
           PROD_HOST: ${{ vars.PROD_HOST }}
           PROD_HOST_ALIASES: ${{ vars.PROD_HOST_ALIASES }}
-          PHP_VERSION_PROD: ${{ vars.PHP_VERSION_PROD }}
-          PHP_VERSION_DEV: ${{ vars.PHP_VERSION_DEV }}
+          PHP_VERSION_PROD: ${{ vars.PHP_VERSION_PROD || '8.3' }}
+          PHP_VERSION_DEV: ${{ vars.PHP_VERSION_DEV || '8.3' }}
           NGINX_ADMIN_IP: ${{ secrets.NGINX_ADMIN_IP }}
           OCI_BACKUP_BUCKET: ${{ secrets.OCI_BACKUP_BUCKET }}
           CF_ORIGIN_CERT: ${{ secrets.CF_ORIGIN_CERT }}
@@ -85,8 +85,8 @@ jobs:
             git checkout dev
             git pull --ff-only origin dev
             cat > docker/.env << ENVEOF
-            PHP_VERSION_PROD=${{ vars.PHP_VERSION_PROD }}
-            PHP_VERSION_DEV=${{ vars.PHP_VERSION_DEV }}
+            PHP_VERSION_PROD=${{ vars.PHP_VERSION_PROD || '8.3' }}
+            PHP_VERSION_DEV=${{ vars.PHP_VERSION_DEV || '8.3' }}
             NGINX_ADMIN_IP=${{ secrets.NGINX_ADMIN_IP }}
             OCI_BACKUP_BUCKET=${{ secrets.OCI_BACKUP_BUCKET }}
             PROD_HOST=${{ vars.PROD_HOST }}
