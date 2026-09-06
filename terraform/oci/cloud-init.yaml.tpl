@@ -21,7 +21,7 @@ runcmd:
   - usermod -aG docker ubuntu
 
   # --- Host firewall as a second layer behind Cloudflare / OCI security list ---
-  - ufw allow 22/tcp
+  - ufw allow from ${admin_ssh_cidr} to any port 22 proto tcp
   - ufw allow 80/tcp
   - ufw allow 443/tcp
   - ufw --force enable

@@ -10,7 +10,7 @@ compartment_ocid = "ocid1.compartment.oc1..xxxxx"
 instance_ocpus     = 4
 instance_memory_gb = 24
 
-ssh_public_key = "ssh-ed25519 AAAA... deploy-key"
+ssh_public_key_  = "ssh-ed25519 AAAA... admin-key"
 admin_ssh_cidr = "203.0.113.4/32" # YOUR ip, not 0.0.0.0/0
 
 git_repo_url    = "https://github.com/YOUR_USER/YOUR_REPO.git"

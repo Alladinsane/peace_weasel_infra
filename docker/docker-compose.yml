@@ -88,6 +88,40 @@ services:
       - wp_data_dev:/var/www/dev
     networks: [wpnet]
 
+  promote-files:
+    image: alpine:3.20
+    profiles: ["tools"]
+    volumes:
+      - wp_data_dev:/source:ro
+      - wp_data_prod:/target
+
+  refresh-dev-files:
+    image: alpine:3.20
+    profiles: ["tools"]
+    volumes:
+      - wp_data_prod:/source:ro
+      - wp_data_dev:/target
+
+  wp-cli-prod:
+    image: wordpress:cli-php8.3
+    profiles: ["tools"]
+    user: "0:0"
+    env_file: prod.env
+    entrypoint: ["wp", "--path=/var/www/html", "--allow-root"]
+    volumes:
+      - wp_data_prod:/var/www/html
+    networks: [wpnet]
+
+  wp-cli-dev:
+    image: wordpress:cli-php8.3
+    profiles: ["tools"]
+    user: "0:0"
+    env_file: dev.env
+    entrypoint: ["wp", "--path=/var/www/html", "--allow-root"]
+    volumes:
+      - wp_data_dev:/var/www/html
+    networks: [wpnet]
+
 networks:
   wpnet:
 

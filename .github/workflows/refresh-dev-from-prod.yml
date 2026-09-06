@@ -1,0 +1,90 @@
+name: Refresh Dev From Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type REFRESH_DEV_FROM_PROD to replace dev with prod"
+        required: true
+        type: string
+
+jobs:
+  refresh-dev:
+    runs-on: ubuntu-latest
+    # Production data is the source, so protect this operation with the same
+    # Environment approval gate as a production deployment.
+    environment: prod
+    steps:
+      - name: Require explicit confirmation
+        if: inputs.confirmation != 'REFRESH_DEV_FROM_PROD'
+        run: |
+          echo "::error::Refresh cancelled: type REFRESH_DEV_FROM_PROD exactly."
+          exit 1
+      - name: Snapshot dev and refresh it from prod over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/wp-stack/docker
+
+            get_env() {
+              grep -m1 "^$2=" "$1" | cut -d= -f2-
+            }
+
+            test -f dev.env && test -f prod.env && test -f .env
+            DEV_PREFIX=$(get_env dev.env WORDPRESS_TABLE_PREFIX)
+            PROD_PREFIX=$(get_env prod.env WORDPRESS_TABLE_PREFIX)
+            test -n "$DEV_PREFIX" && test "$DEV_PREFIX" = "$PROD_PREFIX" || {
+              echo "Dev and prod must use the same WORDPRESS_TABLE_PREFIX to refresh safely."
+              exit 1
+            }
+
+            DEV_MYSQL_USER=$(get_env dev.env MYSQL_USER)
+            DEV_MYSQL_PASSWORD=$(get_env dev.env MYSQL_PASSWORD)
+            DEV_MYSQL_DATABASE=$(get_env dev.env MYSQL_DATABASE)
+            PROD_MYSQL_USER=$(get_env prod.env MYSQL_USER)
+            PROD_MYSQL_PASSWORD=$(get_env prod.env MYSQL_PASSWORD)
+            PROD_MYSQL_DATABASE=$(get_env prod.env MYSQL_DATABASE)
+            DEV_HOST=$(get_env .env DEV_HOST)
+            PROD_HOST=$(get_env .env PROD_HOST)
+            OCI_BACKUP_BUCKET=$(get_env .env OCI_BACKUP_BUCKET)
+
+            # Preserve an off-server restore point for dev before overwriting it.
+            mkdir -p ~/.oci
+            echo "${{ secrets.OCI_CLI_CONFIG }}" > ~/.oci/config
+            echo "${{ secrets.OCI_CLI_KEY }}" > ~/.oci/oci_api_key.pem
+            chmod 600 ~/.oci/oci_api_key.pem
+            docker compose --profile dev up -d db-dev
+            docker compose --profile tools run --rm \
+              -v ~/.oci:/root/.oci:ro \
+              -e MYSQL_USER="$DEV_MYSQL_USER" \
+              -e MYSQL_PASSWORD="$DEV_MYSQL_PASSWORD" \
+              -e MYSQL_DATABASE="$DEV_MYSQL_DATABASE" \
+              -e MYSQL_HOST=db-dev \
+              -e WP_CONTENT_PATH=/var/www/dev/wp-content \
+              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
+              -e OCI_BACKUP_PREFIX=dev \
+              backup
+
+            # Pause dev while it is replaced. The production dump is a
+            # consistent InnoDB snapshot, so production stays online.
+            docker compose --profile dev --profile prod up -d db-dev db-prod
+            docker compose --profile dev stop php-dev || true
+            docker compose exec -T db-prod mariadb-dump --single-transaction --add-drop-table \
+              -u "$PROD_MYSQL_USER" "-p$PROD_MYSQL_PASSWORD" "$PROD_MYSQL_DATABASE" \
+              | docker compose exec -T db-dev mariadb \
+                -u "$DEV_MYSQL_USER" "-p$DEV_MYSQL_PASSWORD" "$DEV_MYSQL_DATABASE"
+            docker compose --profile tools run --rm refresh-dev-files \
+              'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /source/. /target/'
+
+            # Make copied WordPress data point to the dev hostname, including
+            # serialized option/plugin data.
+            docker compose --profile tools run --rm wp-cli-dev search-replace \
+              "$PROD_HOST" "$DEV_HOST" --all-tables --precise --skip-columns=guid
+            docker compose --profile tools run --rm wp-cli-dev option update home "https://$DEV_HOST"
+            docker compose --profile tools run --rm wp-cli-dev option update siteurl "https://$DEV_HOST"
+            docker compose --profile dev up -d php-dev
+            docker compose --profile edge up -d nginx

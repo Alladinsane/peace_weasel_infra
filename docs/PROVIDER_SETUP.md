@@ -60,9 +60,23 @@ In both `state.backend.hcl` files, replace `<object-storage-namespace>` and
 use the OCI region that you selected. Leave the two different `key` values in
 place: they prevent the OCI and Cloudflare stacks from overwriting each other.
 
-Fill the OCI `terraform.tfvars` values from step 1. Use an existing SSH public
-key for `ssh_public_key`, set `admin_ssh_cidr` to your current public IP with
-`/32`, and point `git_repo_url` at your fork.
+The OCI Terraform module is deliberately guarded to one Always Free
+`VM.Standard.A1.Flex` instance with at most 4 OCPUs and 24 GB RAM. Terraform
+also refuses to destroy that instance or the managed backups bucket during a
+normal destroy or replacement. Removing those protections should be an
+explicit, reviewed recovery decision.
+
+These checks do not enforce tenancy-wide billing. They cannot prevent costs
+from resources created outside this module, unexpected network egress, or an
+OCI account exceeding its free allowance through another workload. Review the
+OCI Console's cost analysis and budgets before treating the account as cost
+bounded.
+
+Fill the OCI `terraform.tfvars` values from step 1. Set
+`admin_ssh_public_key` to your personal public key and
+`deploy_ssh_public_key` to the public half of the dedicated GitHub Actions
+deployment key. Set `admin_ssh_cidr` to your current public IP with `/32`,
+and point `git_repo_url` at your fork.
 
 ## 3. Create a scoped Cloudflare token
 
@@ -121,3 +135,48 @@ docker compose --profile dev stop
 This leaves `prod` and nginx running. Substitute `prod` to pause production.
 Restart an environment with `docker compose --profile dev up -d`; its named
 database and WordPress volumes are preserved while it is stopped.
+
+## 5. Start prod, promote dev, and cut over
+
+For the first production deployment, run **Actions > Deploy > Run workflow**,
+select the `main` branch, and choose `prod`. This creates only the production
+database and PHP runtime plus nginx. Start development later by running the
+same workflow from the `dev` branch and choosing `dev`.
+
+Use **Actions > Manage Dev Runtime** to start or stop development when it is
+not needed. Stopping dev leaves production and nginx running; only the dev
+hostname returns 502.
+
+Use **Actions > Promote Dev to Prod** after testing changes in dev. It requires
+the exact confirmation `PROMOTE_DEV_TO_PROD`, creates an off-server production
+backup, replaces production's database and `wp-content` with dev's, rewrites
+the dev hostname to `PROD_HOST` in WordPress data, and restarts production.
+It stops dev by default. Configure a required reviewer on the `prod` GitHub
+Environment before using promotion.
+
+Because production content changes independently, use **Actions > Refresh Dev
+From Prod** to make a new dev baseline after the initial production site is
+ready or whenever desired. It requires `REFRESH_DEV_FROM_PROD`, backs up the
+current dev site first, copies production's database and `wp-content` into dev,
+rewrites WordPress URLs for `DEV_HOST`, and starts dev. It does not modify
+production.
+
+**Restore** defaults to validation only. After confirming that a backup passes,
+run it again with `validate_only` disabled and type `RESTORE_DEV` or
+`RESTORE_PROD` for the selected target. The workflow creates a new off-server
+backup of that target before it can overwrite any data.
+
+Set `PROD_HOST` to the canonical public hostname and optionally set
+`PROD_HOST_ALIASES` to additional hostnames nginx should serve. For a future
+cutover from `prod.example.com` to `example.com`, obtain an Origin CA
+certificate covering both names, set
+`PROD_HOST=example.com` and `PROD_HOST_ALIASES=prod.example.com`, deploy prod,
+then change WordPress's `home` and `siteurl` to `https://example.com`.
+
+`prod_alias_subdomain = "@"` creates the apex record only for the Cloudflare
+zone in `zone_id`. It creates `example.com` only when Cloudflare manages the
+entire `example.com` zone. If Cloudflare manages a delegated child zone such
+as `shop.example.com`, `@` means `shop.example.com`; your spouse must instead
+change the `example.com` record at their existing DNS provider for the final
+cutover. That apex traffic will not receive Cloudflare protection unless the
+full parent zone is later moved to Cloudflare.

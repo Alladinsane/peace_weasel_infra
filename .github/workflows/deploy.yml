@@ -39,6 +39,7 @@ jobs:
             NGINX_ADMIN_IP=${{ secrets.NGINX_ADMIN_IP }}
             OCI_BACKUP_BUCKET=${{ secrets.OCI_BACKUP_BUCKET }}
             PROD_HOST=${{ vars.PROD_HOST }}
+            PROD_HOST_ALIASES=${{ vars.PROD_HOST_ALIASES }}
             DEV_HOST=${{ vars.DEV_HOST }}
             ENVEOF
 

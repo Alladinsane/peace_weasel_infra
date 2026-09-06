@@ -16,14 +16,19 @@ resource "oci_objectstorage_bucket" "backups" {
   namespace      = data.oci_objectstorage_namespace.this.namespace
   name           = "wp-backups"
   storage_tier   = "Standard"
+
+  lifecycle {
+    # Backups are the recovery path for production; never remove this bucket
+    # through an ordinary Terraform destroy or replacement.
+    prevent_destroy = true
+  }
 }
 
 # Moves backups older than 45 days into the Archive tier, which draws from
 # its OWN separate 10GB Always Free allowance — so long-term backup history
 # doesn't eat into the same 10GB Standard pool the state bucket shares.
-# scripts/backup.sh's 14-backup rolling delete keeps *recent* Standard-tier
-# usage small; this keeps older history around for free too, just slower to
-# restore from (Archive requires a restore request before it's readable).
+# Backups are never deleted automatically; archived history is slower to
+# restore because Archive objects require a restore request before reading.
 resource "oci_objectstorage_object_lifecycle_policy" "backups_expiry" {
   bucket    = oci_objectstorage_bucket.backups.name
   namespace = data.oci_objectstorage_namespace.this.namespace

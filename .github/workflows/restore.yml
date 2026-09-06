@@ -12,15 +12,26 @@ on:
         description: "Backup timestamp, e.g. 20260101-120000 (see Object Storage bucket listing under dev/ or prod/)"
         required: true
         type: string
+      confirmation:
+        description: "Type RESTORE_DEV or RESTORE_PROD for the selected target"
+        required: true
+        type: string
+      validate_only:
+        description: "Verify the backup without changing the target environment"
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   restore:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
-      - name: Confirm this is intentional
+      - name: Require explicit confirmation
+        if: inputs.confirmation != format('RESTORE_{0}', upper(inputs.environment))
         run: |
-          echo "::warning::Restoring ${{ github.event.inputs.environment }} from ${{ github.event.inputs.restore_stamp }}. This overwrites that environment's current DB + wp-content."
+          echo "::error::Restore cancelled: confirmation does not match the selected target."
+          exit 1
       - name: Run restore over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -39,6 +50,22 @@ jobs:
             source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' "$TARGET_ENV.env")
             source <(grep OCI_BACKUP_BUCKET .env)
 
+            if [[ "${{ inputs.validate_only }}" != "true" ]]; then
+              docker compose --profile "$TARGET_ENV" up -d "db-$TARGET_ENV"
+              docker compose --profile "$TARGET_ENV" stop "php-$TARGET_ENV" || true
+              # A restore never overwrites its target without a fresh,
+              # off-server rollback point created first.
+              docker compose --profile tools run --rm \
+                -v ~/.oci:/root/.oci:ro \
+                -e MYSQL_USER="$MYSQL_USER" \
+                -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+                -e MYSQL_DATABASE="$MYSQL_DATABASE" \
+                -e MYSQL_HOST="db-$TARGET_ENV" \
+                -e WP_CONTENT_PATH="/var/www/$TARGET_ENV/wp-content" \
+                -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
+                -e OCI_BACKUP_PREFIX="$TARGET_ENV" \
+                backup
+            fi
             docker compose --profile tools run --rm \
               --entrypoint /restore.sh \
               -v ~/.oci:/root/.oci:ro \
@@ -50,4 +77,9 @@ jobs:
               -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
               -e OCI_BACKUP_PREFIX="$TARGET_ENV" \
               -e RESTORE_STAMP="${{ github.event.inputs.restore_stamp }}" \
+              -e VALIDATE_ONLY="${{ inputs.validate_only }}" \
               backup
+            if [[ "${{ inputs.validate_only }}" != "true" ]]; then
+              docker compose --profile "$TARGET_ENV" up -d "php-$TARGET_ENV"
+              docker compose --profile edge up -d nginx
+            fi

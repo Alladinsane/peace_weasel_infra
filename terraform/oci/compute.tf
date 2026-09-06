@@ -33,10 +33,13 @@ resource "oci_core_instance" "wp" {
   }
 
   metadata = {
-    ssh_authorized_keys = var.ssh_public_key
+    ssh_authorized_keys = join("\n", [
+      var.ssh_public_key
+    ])
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tpl", {
       git_repo_url    = var.git_repo_url
       git_repo_branch = var.git_repo_branch
+      admin_ssh_cidr  = var.admin_ssh_cidr
     }))
   }
 
@@ -45,5 +48,11 @@ resource "oci_core_instance" "wp" {
   # which push WP DB + uploads off-box to Object Storage on a schedule.
   freeform_tags = {
     project = "wp-oci-free-stack"
+  }
+
+  lifecycle {
+    # Prevent an accidental plan from destroying the only host and its local
+    # Docker volumes. Intentional replacement requires removing this guard.
+    prevent_destroy = true
   }
 }

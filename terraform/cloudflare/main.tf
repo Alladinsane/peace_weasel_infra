@@ -31,6 +31,12 @@ variable "prod_subdomain" {
   type        = string
 }
 
+variable "prod_alias_subdomain" {
+  description = "Optional second production record, e.g. '@' for the zone apex. Leave null until cutover."
+  type        = string
+  default     = null
+}
+
 variable "dev_subdomain" {
   description = "e.g. 'dev' for dev.shop.example.com — your safe space to test upgrades/plugins"
   type        = string
