@@ -15,7 +15,8 @@ case "$OCI_BACKUP_PREFIX" in
   *) echo "Refusing an unexpected restore prefix or WordPress path." >&2; exit 1 ;;
 esac
 case "$RESTORE_TARGET_ENV:$WP_CONTENT_PATH" in
-  dev:/var/www/dev/wp-content|prod:/var/www/prod/wp-content) ;;
+  prod:/var/www/html/wp-content) ;;
+  dev:/var/www/html/wp-content) ;;
   *) echo "Refusing an unexpected restore target or WordPress path." >&2; exit 1 ;;
 esac
 printf '%s' "$RESTORE_STAMP" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || {
@@ -50,7 +51,7 @@ if [ "${VALIDATE_ONLY:-false}" = "true" ]; then
   exit 0
 fi
 
-echo "Restoring $OCI_BACKUP_PREFIX database..."
+echo "Restoring $OCI_BACKUP_PREFIX database into $RESTORE_TARGET_ENV..."
 gunzip -c "$WORK/db.sql.gz" > "$WORK/db.sql"
 MYSQL_PWD="$MYSQL_PASSWORD" mysql -h "$MYSQL_HOST" -u "$MYSQL_USER" "$MYSQL_DATABASE" < "$WORK/db.sql"
 
@@ -58,4 +59,4 @@ echo "Restoring wp-content..."
 rm -rf "$WP_CONTENT_PATH"
 tar -xzf "$WORK/wp-content.tar.gz" -C "$(dirname "$WP_CONTENT_PATH")"
 
-echo "Restore of $PREFIX into $OCI_BACKUP_PREFIX complete."
+echo "Restore of $PREFIX into $RESTORE_TARGET_ENV complete."

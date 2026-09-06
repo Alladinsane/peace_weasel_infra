@@ -9,7 +9,7 @@ set -eu
 : "${WP_CONTENT_PATH:?}" "${OCI_BACKUP_BUCKET:?}" "${OCI_BACKUP_PREFIX:?}"
 
 case "$OCI_BACKUP_PREFIX:$WP_CONTENT_PATH" in
-  dev:/var/www/dev/wp-content|prod:/var/www/prod/wp-content) ;;
+  prod:/var/www/html/wp-content) ;;
   *) echo "Refusing an unexpected backup prefix or WordPress path." >&2; exit 1 ;;
 esac
 
