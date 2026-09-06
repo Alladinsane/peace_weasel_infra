@@ -65,6 +65,15 @@ resource "oci_core_security_list" "this" {
       max = 22
     }
   }
+
+  ingress_security_rules {
+    protocol = "6"
+    source   = "10.0.0.0/16"
+    tcp_options {
+      min = 22
+      max = 22
+    }
+  }
 }
 
 resource "oci_core_subnet" "this" {

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.7.0"
 
   required_providers {
     cloudflare = {
@@ -12,12 +12,13 @@ terraform {
     skip_region_validation      = true
     skip_credentials_validation = true
     skip_metadata_api_check     = true
-    force_path_style            = true
+    skip_s3_checksum            = true
+    use_path_style              = true
   }
 }
 
 # CLOUDFLARE_API_TOKEN is read from the environment — never put it in a
-# .tfvars file. Scope the token to Zone:DNS:Edit, Zone:Firewall Services:Edit,
+# .tfvars file. Scope the token to Zone:DNS:Edit, Zone:WAF:Edit,
 # and Zone:Bot Management:Edit for this zone only.
 provider "cloudflare" {}
 
@@ -27,7 +28,7 @@ variable "zone_id" {
 }
 
 variable "prod_subdomain" {
-  description = "e.g. 'shop' for shop.example.com"
+  description = "e.g. 'prod' for prod.peaceweasel.com"
   type        = string
 }
 
@@ -38,13 +39,19 @@ variable "prod_alias_subdomain" {
 }
 
 variable "dev_subdomain" {
-  description = "e.g. 'dev' for dev.shop.example.com — your safe space to test upgrades/plugins"
+  description = "e.g. 'dev' for dev.peaceweasel.com"
   type        = string
 }
 
 variable "origin_ip" {
-  description = "Public IP of the single OCI instance (Terraform OCI output) — same for both records, nginx routes by hostname."
+  description = "Public IP of the production OCI instance."
   type        = string
+}
+
+variable "dev_origin_ip" {
+  description = "Optional public IP of the separately managed dev VM. Leave null while dev is destroyed."
+  type        = string
+  default     = null
 }
 
 variable "admin_ip" {

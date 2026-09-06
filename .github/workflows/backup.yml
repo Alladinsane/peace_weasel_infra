@@ -13,15 +13,19 @@ on:
         options: [dev, prod]
         default: prod
 
+concurrency:
+  group: peaceweasel-operations
+  cancel-in-progress: false
+
 jobs:
   backup:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, peaceweasel]
     environment: ${{ github.event.inputs.environment || 'prod' }}
     steps:
       - name: Run backup over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
+          host: ${{ (github.event_name == 'schedule' || inputs.environment == 'prod') && '127.0.0.1' || secrets.SSH_HOST_DEV_PRIVATE }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |

@@ -18,10 +18,9 @@ resource "oci_objectstorage_bucket" "backups" {
   storage_tier   = "Standard"
 
   lifecycle {
-    # Backups are the recovery path for production; never remove this bucket
-    # through an ordinary Terraform destroy or replacement.
     prevent_destroy = true
   }
+
 }
 
 # Moves backups older than 45 days into the Archive tier, which draws from

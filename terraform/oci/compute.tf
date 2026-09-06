@@ -11,9 +11,9 @@ data "oci_core_images" "ubuntu_arm" {
   sort_order               = "DESC"
 }
 
-resource "oci_core_instance" "wp" {
+resource "oci_core_instance" "prod" {
   compartment_id      = var.compartment_ocid
-  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[var.availability_domain_index].name
   display_name        = "wp-host"
   shape               = "VM.Standard.A1.Flex" # Always Free ARM shape
 
@@ -47,12 +47,49 @@ resource "oci_core_instance" "wp" {
   # It is NOT the backup strategy — see scripts/backup.sh + backup.yml,
   # which push WP DB + uploads off-box to Object Storage on a schedule.
   freeform_tags = {
-    project = "wp-oci-free-stack"
+    project     = "wp-oci-free-stack"
+    environment = "prod"
   }
 
   lifecycle {
-    # Prevent an accidental plan from destroying the only host and its local
-    # Docker volumes. Intentional replacement requires removing this guard.
     prevent_destroy = true
+  }
+}
+
+resource "oci_core_instance" "dev" {
+  count = var.enable_dev_vm ? 1 : 0
+
+  compartment_id      = var.compartment_ocid
+  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[var.availability_domain_index].name
+  display_name        = "wp-dev-host"
+  shape               = "VM.Standard.A1.Flex"
+
+  shape_config {
+    ocpus         = var.dev_ocpus
+    memory_in_gbs = var.dev_memory_gb
+  }
+
+  source_details {
+    source_type = "image"
+    source_id   = data.oci_core_images.ubuntu_arm.images[0].id
+  }
+
+  create_vnic_details {
+    subnet_id        = oci_core_subnet.this.id
+    assign_public_ip = true
+  }
+
+  metadata = {
+    ssh_authorized_keys = var.ssh_public_key
+    user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tpl", {
+      git_repo_url    = var.git_repo_url
+      git_repo_branch = var.git_repo_branch
+      admin_ssh_cidr  = var.admin_ssh_cidr
+    }))
+  }
+
+  freeform_tags = {
+    project     = "wp-oci-free-stack"
+    environment = "dev"
   }
 }

@@ -7,3 +7,5 @@ key                         = "cloudflare/terraform.tfstate"
 region                      = "us-ashburn-1"
 endpoints                   = { s3 = "https://<object-storage-namespace>.compat.objectstorage.us-ashburn-1.oraclecloud.com" }
 skip_requesting_account_id  = true
+skip_s3_checksum             = true
+use_path_style               = true

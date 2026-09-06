@@ -2,17 +2,10 @@
 
 ## SSH key custody
 
-Use two separate Ed25519 keypairs:
-
-- The **admin key** stays on your computer. Put only its public key in
-	Terraform as `admin_ssh_public_key`; use the private key for interactive
-	SSH and SFTP access.
-- The **deploy key** is dedicated to GitHub Actions. Put only its public key in
-	Terraform as `deploy_ssh_public_key`; store its private key only in the
-	GitHub repository secret `SSH_PRIVATE_KEY`.
-
-Terraform installs both public keys for the `ubuntu` user. It does not create,
-store, or upload either private key.
+Use one Ed25519 keypair for this small deployment. Keep the private key on
+your computer and in the GitHub repository secret `SSH_PRIVATE_KEY`; put only
+its public key in Terraform as `ssh_public_key`. Terraform does not create,
+store, or upload the private key.
 
 ## Local-only files (gitignored, never committed)
 - `terraform/oci/terraform.tfvars`
@@ -31,9 +24,11 @@ prod's database.
 ### Repository-level secrets (shared — one host)
 | Secret | Used by |
 |---|---|
-| `SSH_HOST` | deploy, backup, restore, dev runtime, promotion, dev refresh |
-| `SSH_USER` | deploy, backup, restore, dev runtime, promotion, dev refresh (`ubuntu`) |
-| `SSH_PRIVATE_KEY` | deploy, backup, restore, dev runtime, promotion, dev refresh — dedicated deploy key, not your personal key |
+| `SSH_HOST_PROD` | deploy, backup, restore, promotion, dev refresh (production VM) |
+| `SSH_HOST_DEV` | deploy, backup, restore, promotion, dev refresh (dev VM, after it is created) |
+| `SSH_HOST_DEV_PRIVATE` | self-hosted production runner's private-network address for dev deploys |
+| `SSH_USER` | deploy, backup, restore, promotion, dev refresh (`ubuntu`) |
+| `SSH_PRIVATE_KEY` | deploy, backup, restore, promotion, dev refresh — dedicated deploy key, not your personal key |
 | `NGINX_ADMIN_IP` | deploy — your current IP; update when it changes |
 | `CF_ORIGIN_CERT`, `CF_ORIGIN_KEY` | deploy — one cert covers both hostnames |
 | `OCI_BACKUP_BUCKET` | deploy, backup, restore, promotion, dev refresh (`wp-backups`) |
@@ -47,6 +42,10 @@ prod's database.
 | `DEV_HOST` | `dev.shop.example.com` |
 | `PHP_VERSION_PROD` | `8.3` |
 | `PHP_VERSION_DEV` | `8.3` — bump this FIRST, test, then bump `PHP_VERSION_PROD` |
+
+`SSH_HOST_DEV` and Cloudflare `dev_origin_ip` are intentionally absent while
+the dev VM is destroyed. Add/update them after Terraform creates dev; remove
+the DNS record when dev is destroyed.
 
 ### Per-Environment secrets (`dev` Environment / `prod` Environment)
 | Secret | Notes |

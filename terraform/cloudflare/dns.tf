@@ -20,11 +20,12 @@ resource "cloudflare_record" "prod_alias" {
 }
 
 resource "cloudflare_record" "dev" {
+  count   = var.dev_origin_ip == null ? 0 : 1
   zone_id = var.zone_id
   name    = var.dev_subdomain
   type    = "A"
-  content = var.origin_ip # same origin as prod — nginx routes by Host header
+  content = var.dev_origin_ip
   proxied = true
   ttl     = 1
-  comment = "wp-oci-free-stack: dev (isolated PHP/DB, shared nginx only)"
+  comment = "wp-oci-free-stack: separately managed dev host"
 }

@@ -3,7 +3,7 @@
 # shared Object Storage backups bucket under <prefix>/<timestamp>/.
 # Env vars (set by backup.yml from that environment's own prod.env/dev.env):
 #   MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, WP_CONTENT_PATH,
-#   OCI_BACKUP_BUCKET, OCI_BACKUP_PREFIX (dev|prod)
+#   OCI_BACKUP_BUCKET, OCI_BACKUP_PREFIX (dev|prod), BACKUP_STAMP (optional)
 set -eu
 : "${MYSQL_HOST:?}" "${MYSQL_USER:?}" "${MYSQL_PASSWORD:?}" "${MYSQL_DATABASE:?}"
 : "${WP_CONTENT_PATH:?}" "${OCI_BACKUP_BUCKET:?}" "${OCI_BACKUP_PREFIX:?}"
@@ -13,7 +13,11 @@ case "$OCI_BACKUP_PREFIX:$WP_CONTENT_PATH" in
   *) echo "Refusing an unexpected backup prefix or WordPress path." >&2; exit 1 ;;
 esac
 
-STAMP=$(date +%Y%m%d-%H%M%S)
+STAMP=${BACKUP_STAMP:-$(date +%Y%m%d-%H%M%S)}
+printf '%s' "$STAMP" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || {
+  echo "BACKUP_STAMP must be YYYYMMDD-HHMMSS." >&2
+  exit 1
+}
 OUT_DIR=/tmp/backup-$STAMP
 mkdir -p "$OUT_DIR"
 trap 'rm -rf "$OUT_DIR"' EXIT

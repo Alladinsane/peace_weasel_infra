@@ -1,87 +1,63 @@
 # Architecture
 
-```
-                    ┌──────────────────────────────────────┐
- visitor ─HTTPS──▶  │  Cloudflare (free plan)               │
-                    │  - proxied DNS for BOTH hosts          │
-                    │  - 2 custom WAF rules, host-agnostic:  │
-                    │    wp-login/admin IP-lock, path blocks │
-                    └───────────────┬────────────────────────┘
-                                    │ HTTPS (one Origin CA cert, both hosts)
-                                    ▼
-        ┌───────────────────────────────────────────────────────┐
-        │  ONE OCI VM.Standard.A1.Flex (Always Free, 4 OCPU/24GB) │
-        │                                                          │
-        │  ufw: 22 (your IP only), 80, 443                        │
-        │                                                          │
-        │   nginx (only shared component — routes by Host header) │
-        │     ├─ shop.example.com ──▶ php-prod ──▶ db-prod         │
-        │     └─ dev.shop.example.com ▶ php-dev  ──▶ db-dev         │
-        │                                                          │
-        │   prod and dev have FULLY separate PHP-FPM containers,   │
-        │   databases, and file volumes — a WP core bump, plugin,  │
-        │   or PHP version change in dev cannot touch prod at all  │
-        └───────────────────────────┬──────────────────────────────┘
-                                    │ scheduled / on-demand, per environment
-                                    ▼
-       ┌───────────────────────┐        ┌────────────────────────┐
-       │ Bucket: wp-terraform-  │        │ Bucket: wp-backups      │
-       │ state                  │        │  - prod/<stamp>/...     │
-       │  - created by hand,    │        │    kept 14, then        │
-       │    once (chicken/egg)  │        │    archived at 45d      │
-       │  - holds both oci/ and │        │  - dev/<stamp>/...      │
-       │    cloudflare/ state   │        │    kept 4, then         │
-       │                        │        │    archived at 45d      │
-       └───────────────────────┘        └────────────────────────┘
-       Both Standard-tier, sharing ONE 10GB Always Free pool —
-       archiving old backups moves them to the SEPARATE 10GB
-       Always Free Archive pool, so history doesn't eat the Standard quota.
+```text
+visitor -> Cloudflare -> prod.peaceweasel.com -> persistent prod VM
+                      -> dev.peaceweasel.com  -> optional dev VM
+
+prod VM: 1 OCPU/6 GB default, nginx + PHP-FPM + MariaDB + prod volumes
+dev VM:  1 OCPU/6 GB default, nginx + PHP-FPM + MariaDB + dev volumes
+
+Both VMs share the OCI VCN/subnet and the off-server OCI backup bucket.
+Dev is created and destroyed by Terraform; refresh and promotion transfer
+backups through Object Storage.
 ```
 
-## Why dev/prod share one instance instead of two
-Running two full OCI instances would each need their own slice of the
-4 OCPU / 24GB Always Free ceiling — workable, but it also means two
-separate boxes to patch, monitor, and pay egress attention to. Hardcoding
-to exactly two environments on one box keeps this simple and still gives
-you real isolation where it matters: **PHP version, WordPress core,
-plugins, and the database are all independent per environment.** Only
-nginx (routing) and the underlying VM/network are shared.
+## Resource model
 
-## Multiple environments, concretely
-- `terraform/cloudflare` creates two DNS records (`prod_subdomain`,
-  `dev_subdomain`) pointing at the SAME origin IP — nginx does the
-  routing, not DNS.
-- `docker/docker-compose.yml` defines `db-prod`/`php-prod` and
-  `db-dev`/`php-dev` as entirely separate services with separate named
-  volumes. `deploy.yml` only ever builds/restarts the one environment
-  it's targeting.
-- `docker/prod.env` and `docker/dev.env` hold that environment's DB
-  credentials; `docker/.env` holds the handful of values nginx and both
-  build steps need regardless of which environment is deploying
-  (`PHP_VERSION_PROD`, `PHP_VERSION_DEV`, the two hostnames, the admin IP).
+The current Always Free A1 pool is 2 OCPUs and 12 GB RAM total. Terraform
+allocates 1 OCPU and 6 GB to each VM while dev exists. When dev is destroyed,
+production may be resized within the same pool if desired.
 
-## One-time manual bootstrap (can't be Terraform'd chicken-and-egg-free)
-1. Create the **state bucket** (`wp-terraform-state`) in OCI Object Storage
-   by hand — it has to exist before Terraform can use it as a backend.
-2. The **backups bucket** (`wp-backups`) does NOT have this problem —
-   `terraform/oci/storage.tf` creates and manages it, including the
-   45-day archive lifecycle rule.
-3. Generate a Cloudflare Origin CA certificate covering BOTH hostnames
-   (or a wildcard) — one cert works for both nginx server blocks.
-4. Generate a dedicated SSH keypair for GitHub Actions to deploy with.
-5. Create two GitHub Environments, `dev` and `prod`, and populate secrets
-   per `docs/SECRETS.md`.
+The production VM is persistent. The dev VM is disposable: its local Docker
+volumes disappear when Terraform destroys it. The authoritative recovery path
+for both environments is the `wp-backups` Object Storage bucket.
 
-## A note on the nginx templating mechanism
-The official nginx image auto-renders `*.template` files in
-`/etc/nginx/templates/` via `envsubst`, but only substitutes variable
-names that actually exist in the container's environment — so nginx's own
-runtime variables (`$uri`, `$host`, `$document_root`, etc.) are left alone.
-Just don't ever name a container env var `host`, `uri`, or similar.
+The VCN, subnet, route table, internet gateway, and security list are shared
+network infrastructure. SSH is restricted to the administrator CIDR; HTTP and
+HTTPS are public so Cloudflare can reach each origin.
 
-## Why Docker Compose instead of bare-metal LEMP
-PHP is its own image/Dockerfile (`docker/php/Dockerfile`) with
-`PHP_VERSION` as a build arg, independently set per environment
-(`PHP_VERSION_DEV` vs `PHP_VERSION_PROD`) — bump dev's PHP version, test
-your plugins against it, and only then bump prod's. nginx and MariaDB
-likewise upgrade independently by bumping their image tags.
+## Data movement
+
+- `backup.yml` creates a database dump and `wp-content` archive under
+  `prod/<timestamp>/` or `dev/<timestamp>/`.
+- `refresh-dev-from-prod.yml` backs up prod, restores that archive on dev, and
+  rewrites URLs to the dev hostname.
+- `promote-dev-to-prod.yml` backs up dev and prod, restores dev into prod, and
+  rewrites URLs to the production hostname.
+- `restore.yml` defaults to validation-only and requires an explicit target
+  confirmation before overwriting an environment.
+
+No promotion or refresh depends on Docker volumes being mounted on the same
+host.
+
+## Bootstrap
+
+1. Create the state bucket manually; Terraform cannot create its own backend.
+2. Apply `terraform/oci` with `enable_dev_vm = false` to create the network,
+   backup bucket, and persistent production VM.
+3. Apply `terraform/cloudflare` with the production IP. Add `dev_origin_ip`
+   only after the dev VM exists.
+4. Deploy prod manually through GitHub Actions.
+5. For testing, set `enable_dev_vm = true`, apply Terraform, add the dev IP to
+   Cloudflare and GitHub, and deploy dev.
+6. Back up dev, set `enable_dev_vm = false`, and apply Terraform to destroy
+   dev. Recreate and refresh it from prod later.
+
+## Runner
+
+A self-hosted runner may be installed on the production VM after bootstrap so
+GitHub does not need inbound SSH from changing GitHub-hosted runner IPs. Keep
+runner registration manual because its token is short-lived, and constrain
+its systemd CPU and memory usage. Do not enable self-hosted workflows until
+the runner is installed and the workflows have been converted from SSH actions
+to local commands.

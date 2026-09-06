@@ -2,15 +2,21 @@
 # Restores a specific backup into a specific environment.
 # Required env: MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE,
 #   WP_CONTENT_PATH, OCI_BACKUP_BUCKET, OCI_BACKUP_PREFIX (dev|prod),
-#   RESTORE_STAMP (e.g. 20260101-120000), VALIDATE_ONLY (optional: true)
+#   RESTORE_STAMP (e.g. 20260101-120000), RESTORE_TARGET_ENV (dev|prod),
+#   VALIDATE_ONLY (optional: true)
 set -eu
 : "${MYSQL_HOST:?}" "${MYSQL_USER:?}" "${MYSQL_PASSWORD:?}" "${MYSQL_DATABASE:?}"
 : "${WP_CONTENT_PATH:?}" "${OCI_BACKUP_BUCKET:?}" "${OCI_BACKUP_PREFIX:?}"
 : "${RESTORE_STAMP:?Set RESTORE_STAMP=<timestamp> e.g. 20260101-120000}"
+: "${RESTORE_TARGET_ENV:?Set RESTORE_TARGET_ENV to dev or prod}"
 
-case "$OCI_BACKUP_PREFIX:$WP_CONTENT_PATH" in
-  dev:/var/www/dev/wp-content|prod:/var/www/prod/wp-content) ;;
+case "$OCI_BACKUP_PREFIX" in
+  dev|prod) ;;
   *) echo "Refusing an unexpected restore prefix or WordPress path." >&2; exit 1 ;;
+esac
+case "$RESTORE_TARGET_ENV:$WP_CONTENT_PATH" in
+  dev:/var/www/dev/wp-content|prod:/var/www/prod/wp-content) ;;
+  *) echo "Refusing an unexpected restore target or WordPress path." >&2; exit 1 ;;
 esac
 printf '%s' "$RESTORE_STAMP" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || {
   echo "RESTORE_STAMP must be YYYYMMDD-HHMMSS." >&2

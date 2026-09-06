@@ -8,16 +8,18 @@ on:
         required: true
         type: string
       stop_dev_after:
-        description: "Stop the dev runtime after promotion"
+        description: "Destroy the dev VM after promotion"
         required: true
         default: true
         type: boolean
 
+concurrency:
+  group: peaceweasel-operations
+  cancel-in-progress: false
+
 jobs:
   promote:
-    runs-on: ubuntu-latest
-    # Configure a required reviewer for this environment in GitHub to add a
-    # human approval gate before production is replaced.
+    runs-on: [self-hosted, linux, ARM64, peaceweasel]
     environment: prod
     steps:
       - name: Require explicit confirmation
@@ -25,78 +27,72 @@ jobs:
         run: |
           echo "::error::Promotion cancelled: type PROMOTE_DEV_TO_PROD exactly."
           exit 1
-      - name: Snapshot prod and promote dev over SSH
+      - name: Choose backup timestamp
+        id: stamp
+        run: echo "stamp=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+      - name: Back up dev to OCI
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
+          host: ${{ secrets.SSH_HOST_DEV_PRIVATE }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
             cd /opt/wp-stack/docker
-
-            get_env() {
-              grep -m1 "^$2=" "$1" | cut -d= -f2-
-            }
-
-            test -f dev.env && test -f prod.env && test -f .env
-            DEV_PREFIX=$(get_env dev.env WORDPRESS_TABLE_PREFIX)
-            PROD_PREFIX=$(get_env prod.env WORDPRESS_TABLE_PREFIX)
-            test -n "$DEV_PREFIX" && test "$DEV_PREFIX" = "$PROD_PREFIX" || {
-              echo "Dev and prod must use the same WORDPRESS_TABLE_PREFIX to promote safely."
-              exit 1
-            }
-
-            DEV_MYSQL_USER=$(get_env dev.env MYSQL_USER)
-            DEV_MYSQL_PASSWORD=$(get_env dev.env MYSQL_PASSWORD)
-            DEV_MYSQL_DATABASE=$(get_env dev.env MYSQL_DATABASE)
-            PROD_MYSQL_USER=$(get_env prod.env MYSQL_USER)
-            PROD_MYSQL_PASSWORD=$(get_env prod.env MYSQL_PASSWORD)
-            PROD_MYSQL_DATABASE=$(get_env prod.env MYSQL_DATABASE)
-            DEV_HOST=$(get_env .env DEV_HOST)
-            PROD_HOST=$(get_env .env PROD_HOST)
-            OCI_BACKUP_BUCKET=$(get_env .env OCI_BACKUP_BUCKET)
-
-            # Keep an off-server production restore point before any overwrite.
             mkdir -p ~/.oci
             echo "${{ secrets.OCI_CLI_CONFIG }}" > ~/.oci/config
             echo "${{ secrets.OCI_CLI_KEY }}" > ~/.oci/oci_api_key.pem
             chmod 600 ~/.oci/oci_api_key.pem
+            source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' dev.env)
+            source <(grep OCI_BACKUP_BUCKET .env)
+            BACKUP_STAMP="${{ steps.stamp.outputs.stamp }}"
+            docker compose --profile dev up -d db-dev
+            docker compose --profile tools run --rm \
+              -v ~/.oci:/root/.oci:ro \
+              -e MYSQL_USER="$MYSQL_USER" -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+              -e MYSQL_DATABASE="$MYSQL_DATABASE" -e MYSQL_HOST=db-dev \
+              -e WP_CONTENT_PATH=/var/www/dev/wp-content \
+              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" -e OCI_BACKUP_PREFIX=dev \
+              -e BACKUP_STAMP="$BACKUP_STAMP" backup
+      - name: Back up prod and restore dev into prod
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 127.0.0.1
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/wp-stack/docker
+            mkdir -p ~/.oci
+            echo "${{ secrets.OCI_CLI_CONFIG }}" > ~/.oci/config
+            echo "${{ secrets.OCI_CLI_KEY }}" > ~/.oci/oci_api_key.pem
+            chmod 600 ~/.oci/oci_api_key.pem
+            source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' prod.env)
+            source <(grep OCI_BACKUP_BUCKET .env)
+            DEV_HOST=$(grep -m1 '^DEV_HOST=' .env | cut -d= -f2-)
+            PROD_HOST=$(grep -m1 '^PROD_HOST=' .env | cut -d= -f2-)
             docker compose --profile prod up -d db-prod
             docker compose --profile tools run --rm \
               -v ~/.oci:/root/.oci:ro \
-              -e MYSQL_USER="$PROD_MYSQL_USER" \
-              -e MYSQL_PASSWORD="$PROD_MYSQL_PASSWORD" \
-              -e MYSQL_DATABASE="$PROD_MYSQL_DATABASE" \
-              -e MYSQL_HOST=db-prod \
+              -e MYSQL_USER="$MYSQL_USER" -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+              -e MYSQL_DATABASE="$MYSQL_DATABASE" -e MYSQL_HOST=db-prod \
               -e WP_CONTENT_PATH=/var/www/prod/wp-content \
-              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
-              -e OCI_BACKUP_PREFIX=prod \
+              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" -e OCI_BACKUP_PREFIX=prod \
               backup
-
-            # Pause both PHP workers, then replace only prod's database and
-            # WordPress content with the dev equivalents.
-            docker compose --profile dev --profile prod up -d db-dev db-prod
-            docker compose --profile dev stop php-dev || true
             docker compose --profile prod stop php-prod || true
-            docker compose exec -T db-dev mariadb-dump --single-transaction --add-drop-table \
-              -u "$DEV_MYSQL_USER" "-p$DEV_MYSQL_PASSWORD" "$DEV_MYSQL_DATABASE" \
-              | docker compose exec -T db-prod mariadb \
-                -u "$PROD_MYSQL_USER" "-p$PROD_MYSQL_PASSWORD" "$PROD_MYSQL_DATABASE"
-            docker compose --profile tools run --rm promote-files \
-              'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /source/. /target/'
-
-            # WP-CLI handles serialized option/plugin data while changing the
-            # dev URL to production's canonical hostname.
+            docker compose --profile tools run --rm --entrypoint /restore.sh \
+              -v ~/.oci:/root/.oci:ro \
+              -e MYSQL_USER="$MYSQL_USER" -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+              -e MYSQL_DATABASE="$MYSQL_DATABASE" -e MYSQL_HOST=db-prod \
+              -e WP_CONTENT_PATH=/var/www/prod/wp-content \
+              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" -e OCI_BACKUP_PREFIX=dev \
+              -e RESTORE_TARGET_ENV=prod -e RESTORE_STAMP="${{ steps.stamp.outputs.stamp }}" \
+              backup
             docker compose --profile tools run --rm wp-cli-prod search-replace \
               "$DEV_HOST" "$PROD_HOST" --all-tables --precise --skip-columns=guid
             docker compose --profile tools run --rm wp-cli-prod option update home "https://$PROD_HOST"
             docker compose --profile tools run --rm wp-cli-prod option update siteurl "https://$PROD_HOST"
-
             docker compose --profile prod up -d php-prod
-            docker compose --profile edge up -d nginx
-            if [[ "${{ inputs.stop_dev_after }}" = "true" ]]; then
-              docker compose --profile dev stop php-dev db-dev
-            else
-              docker compose --profile dev up -d php-dev
-            fi
+      - name: Dev VM teardown reminder
+        if: inputs.stop_dev_after == true
+        run: echo "Destroy the dev VM with Terraform after this promotion and its final backup."

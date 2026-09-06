@@ -9,30 +9,81 @@ on:
         type: choice
         options: [dev, prod]
 
+concurrency:
+  group: peaceweasel-operations
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    # GitHub Environments give per-environment DB creds/PHP version + optional
-    # required reviewers on prod, at no cost on a public repo. SSH connection
-    # details are repo-level secrets since dev and prod share ONE host.
-    environment: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+    runs-on: [self-hosted, linux, ARM64, peaceweasel]
+    environment: ${{ inputs.environment }}
     steps:
-      - name: Deploy over SSH
+      - name: Deploy production locally
+        if: inputs.environment == 'prod'
+        shell: bash
+        env:
+          PROD_HOST: ${{ vars.PROD_HOST }}
+          PROD_HOST_ALIASES: ${{ vars.PROD_HOST_ALIASES }}
+          PHP_VERSION_PROD: ${{ vars.PHP_VERSION_PROD }}
+          PHP_VERSION_DEV: ${{ vars.PHP_VERSION_DEV }}
+          NGINX_ADMIN_IP: ${{ secrets.NGINX_ADMIN_IP }}
+          OCI_BACKUP_BUCKET: ${{ secrets.OCI_BACKUP_BUCKET }}
+          CF_ORIGIN_CERT: ${{ secrets.CF_ORIGIN_CERT }}
+          CF_ORIGIN_KEY: ${{ secrets.CF_ORIGIN_KEY }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
+          MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          WORDPRESS_TABLE_PREFIX: ${{ secrets.WORDPRESS_TABLE_PREFIX }}
+        run: |
+          set -euo pipefail
+          cd /opt/wp-stack
+          git fetch origin
+          git checkout main
+          git pull --ff-only origin main
+          cat > docker/.env <<ENVEOF
+          PHP_VERSION_PROD=$PHP_VERSION_PROD
+          PHP_VERSION_DEV=$PHP_VERSION_DEV
+          NGINX_ADMIN_IP=$NGINX_ADMIN_IP
+          OCI_BACKUP_BUCKET=$OCI_BACKUP_BUCKET
+          PROD_HOST=$PROD_HOST
+          PROD_HOST_ALIASES=$PROD_HOST_ALIASES
+          DEV_HOST=${{ vars.DEV_HOST }}
+          ENVEOF
+          mkdir -p docker/nginx/certs
+          printf '%s\n' "$CF_ORIGIN_CERT" > docker/nginx/certs/cloudflare-origin.pem
+          printf '%s\n' "$CF_ORIGIN_KEY" > docker/nginx/certs/cloudflare-origin.key
+          chmod 600 docker/nginx/certs/cloudflare-origin.key
+          cat > docker/prod.env <<ENVEOF
+          MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+          MYSQL_DATABASE=$MYSQL_DATABASE
+          MYSQL_USER=$MYSQL_USER
+          MYSQL_PASSWORD=$MYSQL_PASSWORD
+          WORDPRESS_DB_HOST=db-prod
+          WORDPRESS_DB_NAME=$MYSQL_DATABASE
+          WORDPRESS_DB_USER=$MYSQL_USER
+          WORDPRESS_DB_PASSWORD=$MYSQL_PASSWORD
+          WORDPRESS_TABLE_PREFIX=$WORDPRESS_TABLE_PREFIX
+          ENVEOF
+          cd docker
+          docker compose --profile prod build php-prod
+          docker compose --profile prod up -d db-prod php-prod
+          docker compose --profile edge up -d nginx
+          docker compose --profile prod exec -T php-prod wp cache flush --allow-root || true
+
+      - name: Deploy dev over the private OCI network
+        if: inputs.environment == 'dev'
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
+          host: ${{ secrets.SSH_HOST_DEV_PRIVATE }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            TARGET_ENV="${{ github.event.inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}"
             cd /opt/wp-stack
             git fetch origin
-            git checkout ${{ github.ref_name }}
-            git pull origin ${{ github.ref_name }}
-
-            # Shared file: written every deploy, same content regardless of
-            # which environment triggered it (both PHP_VERSION_* must coexist).
+            git checkout dev
+            git pull --ff-only origin dev
             cat > docker/.env << ENVEOF
             PHP_VERSION_PROD=${{ vars.PHP_VERSION_PROD }}
             PHP_VERSION_DEV=${{ vars.PHP_VERSION_DEV }}
@@ -42,33 +93,22 @@ jobs:
             PROD_HOST_ALIASES=${{ vars.PROD_HOST_ALIASES }}
             DEV_HOST=${{ vars.DEV_HOST }}
             ENVEOF
-
             mkdir -p docker/nginx/certs
-            echo "${{ secrets.CF_ORIGIN_CERT }}" > docker/nginx/certs/cloudflare-origin.pem
-            echo "${{ secrets.CF_ORIGIN_KEY }}"  > docker/nginx/certs/cloudflare-origin.key
+            printf '%s\n' '${{ secrets.CF_ORIGIN_CERT }}' > docker/nginx/certs/cloudflare-origin.pem
+            printf '%s\n' '${{ secrets.CF_ORIGIN_KEY }}' > docker/nginx/certs/cloudflare-origin.key
             chmod 600 docker/nginx/certs/cloudflare-origin.key
-
-            # Only this environment's own file, from THIS GitHub Environment's
-            # secrets — never touches the other environment's DB/PHP version.
-            cat > docker/$TARGET_ENV.env << ENVEOF
+            cat > docker/dev.env << ENVEOF
             MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
             MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
             MYSQL_USER=${{ secrets.MYSQL_USER }}
             MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
-            WORDPRESS_DB_HOST=db-$TARGET_ENV
+            WORDPRESS_DB_HOST=db-dev
             WORDPRESS_DB_NAME=${{ secrets.MYSQL_DATABASE }}
             WORDPRESS_DB_USER=${{ secrets.MYSQL_USER }}
             WORDPRESS_DB_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
             WORDPRESS_TABLE_PREFIX=${{ secrets.WORDPRESS_TABLE_PREFIX }}
             ENVEOF
-
             cd docker
-            # Only build/(re)start THIS environment's containers.
-            docker compose --profile "$TARGET_ENV" build php-$TARGET_ENV
-            docker compose --profile "$TARGET_ENV" up -d db-$TARGET_ENV php-$TARGET_ENV
-
-            # Nginx resolves each PHP service at request time, so it can
-            # continue serving one environment while the other is stopped.
+            docker compose --profile dev build php-dev
+            docker compose --profile dev up -d db-dev php-dev
             docker compose --profile edge up -d nginx
-
-            docker compose --profile "$TARGET_ENV" exec -T php-$TARGET_ENV wp cache flush --allow-root || true

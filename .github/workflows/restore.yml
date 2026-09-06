@@ -22,9 +22,13 @@ on:
         default: true
         type: boolean
 
+concurrency:
+  group: peaceweasel-operations
+  cancel-in-progress: false
+
 jobs:
   restore:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, peaceweasel]
     environment: ${{ github.event.inputs.environment }}
     steps:
       - name: Require explicit confirmation
@@ -35,7 +39,7 @@ jobs:
       - name: Run restore over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
+          host: ${{ inputs.environment == 'prod' && '127.0.0.1' || secrets.SSH_HOST_DEV_PRIVATE }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -76,6 +80,7 @@ jobs:
               -e WP_CONTENT_PATH="/var/www/$TARGET_ENV/wp-content" \
               -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
               -e OCI_BACKUP_PREFIX="$TARGET_ENV" \
+              -e RESTORE_TARGET_ENV="$TARGET_ENV" \
               -e RESTORE_STAMP="${{ github.event.inputs.restore_stamp }}" \
               -e VALIDATE_ONLY="${{ inputs.validate_only }}" \
               backup
