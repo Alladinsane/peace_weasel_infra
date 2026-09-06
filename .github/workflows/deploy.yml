@@ -10,22 +10,21 @@ on:
         options: [dev, prod]
 
 concurrency:
-  group: peaceweasel-operations
+  group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, ARM64, peaceweasel]
+    runs-on: [self-hosted, linux, ARM64, "env-${{ inputs.environment }}"]
     environment: ${{ inputs.environment }}
     steps:
-      - name: Deploy production locally
-        if: inputs.environment == 'prod'
+      - name: Deploy
         shell: bash
         env:
-          PROD_HOST: ${{ vars.PROD_HOST }}
-          PROD_HOST_ALIASES: ${{ vars.PROD_HOST_ALIASES }}
-          PHP_VERSION_PROD: ${{ vars.PHP_VERSION_PROD || '8.3' }}
-          PHP_VERSION_DEV: ${{ vars.PHP_VERSION_DEV || '8.3' }}
+          BRANCH: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
+          PHP_VERSION: ${{ vars.PHP_VERSION || '8.3' }}
+          APP_HOST: ${{ vars.APP_HOST }}
+          APP_HOST_ALIASES: ${{ vars.APP_HOST_ALIASES }}
           NGINX_ADMIN_IP: ${{ secrets.NGINX_ADMIN_IP }}
           OCI_BACKUP_BUCKET: ${{ secrets.OCI_BACKUP_BUCKET }}
           CF_ORIGIN_CERT: ${{ secrets.CF_ORIGIN_CERT }}
@@ -39,76 +38,35 @@ jobs:
           set -euo pipefail
           cd /opt/wp-stack
           git fetch origin
-          git checkout main
-          git pull --ff-only origin main
+          git checkout "$BRANCH"
+          git pull --ff-only origin "$BRANCH"
+
           cat > docker/.env <<ENVEOF
-          PHP_VERSION_PROD=$PHP_VERSION_PROD
-          PHP_VERSION_DEV=$PHP_VERSION_DEV
+          PHP_VERSION=$PHP_VERSION
+          APP_HOST=$APP_HOST
+          APP_HOST_ALIASES=$APP_HOST_ALIASES
           NGINX_ADMIN_IP=$NGINX_ADMIN_IP
           OCI_BACKUP_BUCKET=$OCI_BACKUP_BUCKET
-          PROD_HOST=$PROD_HOST
-          PROD_HOST_ALIASES=$PROD_HOST_ALIASES
-          DEV_HOST=${{ vars.DEV_HOST || 'dev-not-configured.invalid' }}
           ENVEOF
+
           mkdir -p docker/nginx/certs
           printf '%s\n' "$CF_ORIGIN_CERT" > docker/nginx/certs/cloudflare-origin.pem
           printf '%s\n' "$CF_ORIGIN_KEY" > docker/nginx/certs/cloudflare-origin.key
           chmod 600 docker/nginx/certs/cloudflare-origin.key
-          cat > docker/prod.env <<ENVEOF
+
+          cat > docker/app.env <<ENVEOF
           MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
           MYSQL_DATABASE=$MYSQL_DATABASE
           MYSQL_USER=$MYSQL_USER
           MYSQL_PASSWORD=$MYSQL_PASSWORD
-          WORDPRESS_DB_HOST=db-prod
+          WORDPRESS_DB_HOST=db
           WORDPRESS_DB_NAME=$MYSQL_DATABASE
           WORDPRESS_DB_USER=$MYSQL_USER
           WORDPRESS_DB_PASSWORD=$MYSQL_PASSWORD
           WORDPRESS_TABLE_PREFIX=$WORDPRESS_TABLE_PREFIX
           ENVEOF
-          cd docker
-          docker compose --profile prod build php-prod
-          docker compose --profile prod up -d db-prod php-prod
-          docker compose --profile edge up -d nginx
-          docker compose --profile tools run --rm wp-cli-prod cache flush --allow-root || true
 
-      - name: Deploy dev over the private OCI network
-        if: inputs.environment == 'dev'
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST_DEV_PRIVATE }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            cd /opt/wp-stack
-            git fetch origin
-            git checkout dev
-            git pull --ff-only origin dev
-            cat > docker/.env << ENVEOF
-            PHP_VERSION_PROD=${{ vars.PHP_VERSION_PROD || '8.3' }}
-            PHP_VERSION_DEV=${{ vars.PHP_VERSION_DEV || '8.3' }}
-            NGINX_ADMIN_IP=${{ secrets.NGINX_ADMIN_IP }}
-            OCI_BACKUP_BUCKET=${{ secrets.OCI_BACKUP_BUCKET }}
-            PROD_HOST=${{ vars.PROD_HOST }}
-            PROD_HOST_ALIASES=${{ vars.PROD_HOST_ALIASES }}
-            DEV_HOST=${{ vars.DEV_HOST || 'dev-not-configured.invalid' }}
-            ENVEOF
-            mkdir -p docker/nginx/certs
-            printf '%s\n' '${{ secrets.CF_ORIGIN_CERT }}' > docker/nginx/certs/cloudflare-origin.pem
-            printf '%s\n' '${{ secrets.CF_ORIGIN_KEY }}' > docker/nginx/certs/cloudflare-origin.key
-            chmod 600 docker/nginx/certs/cloudflare-origin.key
-            cat > docker/dev.env << ENVEOF
-            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
-            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
-            MYSQL_USER=${{ secrets.MYSQL_USER }}
-            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
-            WORDPRESS_DB_HOST=db-dev
-            WORDPRESS_DB_NAME=${{ secrets.MYSQL_DATABASE }}
-            WORDPRESS_DB_USER=${{ secrets.MYSQL_USER }}
-            WORDPRESS_DB_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
-            WORDPRESS_TABLE_PREFIX=${{ secrets.WORDPRESS_TABLE_PREFIX }}
-            ENVEOF
-            cd docker
-            docker compose --profile dev build php-dev
-            docker compose --profile dev up -d db-dev php-dev
-            docker compose --profile edge up -d nginx
+          cd docker
+          docker compose build php
+          docker compose up -d db php nginx
+          docker compose --profile tools run --rm wp-cli cache flush --allow-root || true

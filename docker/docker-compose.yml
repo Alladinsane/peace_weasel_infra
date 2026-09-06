@@ -1,9 +1,7 @@
 services:
-  # ---- PROD: fully independent DB + PHP, own volumes ----
-  db-prod:
+  db:
     image: mariadb:11
     restart: unless-stopped
-    profiles: ["prod"]
     deploy:
       resources:
         limits:
@@ -18,18 +16,17 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
-    env_file: prod.env
+    env_file: app.env
     volumes:
-      - db_data_prod:/var/lib/mysql
+      - db_data:/var/lib/mysql
     networks: [wpnet]
 
-  php-prod:
+  php:
     build:
       context: ./php
       args:
-        PHP_VERSION: ${PHP_VERSION_PROD:-8.3}
+        PHP_VERSION: ${PHP_VERSION:-8.3}
     restart: unless-stopped
-    profiles: ["prod"]
     deploy:
       resources:
         limits:
@@ -44,72 +41,17 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    env_file: prod.env
+    env_file: app.env
     volumes:
-      - wp_data_prod:/var/www/html
-    depends_on: [db-prod]
+      - wp_data:/var/www/html
+    depends_on: [db]
     networks: [wpnet]
 
-  # ---- DEV: separate DB + PHP + volumes — a plugin, WP core bump, or PHP
-  # version change here cannot touch prod's database or files at all ----
-  db-dev:
-    image: mariadb:11
-    restart: unless-stopped
-    profiles: ["dev"]
-    deploy:
-      resources:
-        limits:
-          cpus: "0.65"
-          memory: 2G
-        reservations:
-          cpus: "0.1"
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 30s
-    env_file: dev.env
-    volumes:
-      - db_data_dev:/var/lib/mysql
-    networks: [wpnet]
-
-  php-dev:
-    build:
-      context: ./php
-      args:
-        PHP_VERSION: ${PHP_VERSION_DEV:-8.3}
-    restart: unless-stopped
-    profiles: ["dev"]
-    deploy:
-      resources:
-        limits:
-          cpus: "0.3"
-          memory: 1.5G
-        reservations:
-          cpus: "0.05"
-          memory: 256M
-    healthcheck:
-      test: ["CMD-SHELL", "php-fpm -t >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    env_file: dev.env
-    volumes:
-      - wp_data_dev:/var/www/html
-    depends_on: [db-dev]
-    networks: [wpnet]
-
-  # ---- Shared edge: the only component that MUST be shared, since only one
-  # process can bind 80/443 on the host. Routes by Host header to the right
-  # upstream. Deploying dev or prod independently never has to touch this
-  # container unless PROD_HOST/DEV_HOST/NGINX_ADMIN_IP themselves change. ----
+  # This box's only edge listener. Knows nothing about the other box —
+  # no other environment's host, volumes, or upstream ever appear here.
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
-    profiles: ["edge"]
     deploy:
       resources:
         limits:
@@ -128,75 +70,39 @@ services:
       - "443:443"
     environment:
       NGINX_ADMIN_IP: ${NGINX_ADMIN_IP}
-      PROD_HOST: ${PROD_HOST}
-      DEV_HOST: ${DEV_HOST}
+      APP_HOST: ${APP_HOST}
+      APP_HOST_ALIASES: ${APP_HOST_ALIASES}
     volumes:
-      - wp_data_prod:/var/www/prod:ro
-      - wp_data_dev:/var/www/dev:ro
-      # writable: nginx's envsubst entrypoint renders templates into this dir
+      - wp_data:/var/www/html:ro
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/templates:/etc/nginx/templates:ro
-      # One Cloudflare Origin CA cert covering both hostnames (or a wildcard)
-      # for Full (Strict) mode — see docs/SECRETS.md.
       - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on: [php]
     networks: [wpnet]
 
-  # Backup runner, invoked per-environment: which DB host / webroot / bucket
-  # prefix it targets is passed as env vars at `docker compose run` time by
-  # backup.yml (using prod.env or dev.env's DB creds) — this service
-  # definition itself is environment-agnostic.
   backup:
     build:
       context: ../scripts
       dockerfile: Dockerfile.backup
     profiles: ["tools"]
+    env_file: app.env
     volumes:
-      # Read-write: restore.sh needs to overwrite wp-content. Only ever runs
-      # on-demand (profile "tools"), never alongside a live deploy, so this
-      # isn't a concurrency risk in practice.
-      - wp_data_prod:/var/www/prod
-      - wp_data_dev:/var/www/dev
+      - wp_data:/var/www/html
     networks: [wpnet]
 
-  promote-files:
-    image: alpine:3.20
-    profiles: ["tools"]
-    volumes:
-      - wp_data_dev:/source:ro
-      - wp_data_prod:/target
-
-  refresh-dev-files:
-    image: alpine:3.20
-    profiles: ["tools"]
-    volumes:
-      - wp_data_prod:/source:ro
-      - wp_data_dev:/target
-
-  wp-cli-prod:
+  wp-cli:
     image: wordpress:cli-php8.3
     profiles: ["tools"]
     user: "0:0"
-    env_file: prod.env
+    env_file: app.env
     entrypoint: ["wp", "--path=/var/www/html", "--allow-root"]
     volumes:
-      - wp_data_prod:/var/www/html
-    networks: [wpnet]
-
-  wp-cli-dev:
-    image: wordpress:cli-php8.3
-    profiles: ["tools"]
-    user: "0:0"
-    env_file: dev.env
-    entrypoint: ["wp", "--path=/var/www/html", "--allow-root"]
-    volumes:
-      - wp_data_dev:/var/www/html
+      - wp_data:/var/www/html
     networks: [wpnet]
 
 networks:
   wpnet:
 
 volumes:
-  db_data_prod:
-  wp_data_prod:
-  db_data_dev:
-  wp_data_dev:
+  db_data:
+  wp_data:

@@ -1,9 +1,3 @@
-# security.conf is loaded automatically by nginx.conf's
-# `include /etc/nginx/conf.d/*.conf;` — do not include it again here.
-
-# Docker's internal DNS lets nginx start even while either isolated WordPress
-# stack is stopped. A request to a stopped environment returns 502; the other
-# hostname continues to be served normally.
 resolver 127.0.0.11 valid=10s;
 
 server {
@@ -12,12 +6,11 @@ server {
     return 301 https://$host$request_uri;
 }
 
-# ---- PROD ----
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${PROD_HOST} ${PROD_HOST_ALIASES};
-    root /var/www/prod;
+    server_name ${APP_HOST} ${APP_HOST_ALIASES};
+    root /var/www/html;
     index index.php;
 
     ssl_certificate     /etc/nginx/certs/cloudflare-origin.pem;
@@ -30,17 +23,13 @@ server {
     }
 
     location ~ \.php$ {
-        set $php_upstream php-prod:9000;
-        fastcgi_pass $php_upstream;
+        fastcgi_pass php:9000;
         fastcgi_index index.php;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
 
     location ~* ^/(wp-login\.php|wp-admin) {
-        # Cloudflare's WAF custom rule is the primary lock (edge-level).
-        # This origin-level lock with the same admin IP still holds even
-        # against a direct hit to the OCI public IP, bypassing Cloudflare.
         allow ${NGINX_ADMIN_IP};
         deny all;
     }
