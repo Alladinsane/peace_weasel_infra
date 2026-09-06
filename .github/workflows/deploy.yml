@@ -48,7 +48,7 @@ jobs:
           OCI_BACKUP_BUCKET=$OCI_BACKUP_BUCKET
           PROD_HOST=$PROD_HOST
           PROD_HOST_ALIASES=$PROD_HOST_ALIASES
-          DEV_HOST=${{ vars.DEV_HOST }}
+          DEV_HOST=${{ vars.DEV_HOST || 'dev-not-configured.invalid' }}
           ENVEOF
           mkdir -p docker/nginx/certs
           printf '%s\n' "$CF_ORIGIN_CERT" > docker/nginx/certs/cloudflare-origin.pem
@@ -91,7 +91,7 @@ jobs:
             OCI_BACKUP_BUCKET=${{ secrets.OCI_BACKUP_BUCKET }}
             PROD_HOST=${{ vars.PROD_HOST }}
             PROD_HOST_ALIASES=${{ vars.PROD_HOST_ALIASES }}
-            DEV_HOST=${{ vars.DEV_HOST }}
+            DEV_HOST=${{ vars.DEV_HOST || 'dev-not-configured.invalid' }}
             ENVEOF
             mkdir -p docker/nginx/certs
             printf '%s\n' '${{ secrets.CF_ORIGIN_CERT }}' > docker/nginx/certs/cloudflare-origin.pem
