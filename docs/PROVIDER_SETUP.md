@@ -99,10 +99,10 @@ OCI account exceeding its free allowance through another workload. Review the
 OCI Console's cost analysis and budgets before treating the account as cost
 bounded.
 
-The Compose resource budget reserves most of the machine for production:
-`db-prod` is capped at 1.5 CPU/8 GB, `php-prod` at 1 CPU/3 GB, `db-dev` at
-0.75 CPU/4 GB, `php-dev` at 0.5 CPU/2 GB, and nginx at 0.25 CPU/256 MB. Dev is
-normally stopped, so those limits protect production when dev is enabled.
+Each VM's Compose resource budget fits its 1 OCPU/6 GB allocation:
+the database is capped at 0.65 CPU/2 GB, PHP at 0.3 CPU/1.5 GB, and nginx at
+0.1 CPU/128 MB. Dev and prod run on separate VMs, so these limits protect
+each environment independently.
 
 ## Runner bootstrap
 
