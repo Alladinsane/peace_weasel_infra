@@ -69,7 +69,7 @@ jobs:
           docker compose --profile prod build php-prod
           docker compose --profile prod up -d db-prod php-prod
           docker compose --profile edge up -d nginx
-          docker compose --profile prod exec -T php-prod wp cache flush --allow-root || true
+          docker compose --profile tools run --rm wp-cli-prod cache flush --allow-root || true
 
       - name: Deploy dev over the private OCI network
         if: inputs.environment == 'dev'
