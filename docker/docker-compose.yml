@@ -133,7 +133,8 @@ services:
     volumes:
       - wp_data_prod:/var/www/prod:ro
       - wp_data_dev:/var/www/dev:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # writable: nginx's envsubst entrypoint renders templates into this dir
+      - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/templates:/etc/nginx/templates:ro
       # One Cloudflare Origin CA cert covering both hostnames (or a wildcard)
       # for Full (Strict) mode — see docs/SECRETS.md.
