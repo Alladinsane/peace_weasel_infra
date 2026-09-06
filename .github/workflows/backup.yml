@@ -3,52 +3,48 @@ name: Backup
 on:
   schedule:
     - cron: "0 9 * * *" # daily, 09:00 UTC — prod
-    - cron: "0 10 * * 1" # weekly Monday, 10:00 UTC — dev (less critical, less often)
   workflow_dispatch:
     inputs:
       environment:
         description: "Environment to back up"
         required: true
         type: choice
-        options: [dev, prod]
+        options: [prod]
         default: prod
 
 concurrency:
-  group: peaceweasel-operations
+  group: ops-${{ github.event.inputs.environment || 'prod' }}
   cancel-in-progress: false
 
 jobs:
   backup:
-    runs-on: [self-hosted, linux, ARM64, peaceweasel]
+    runs-on: [self-hosted, linux, ARM64, "env-${{ github.event.inputs.environment || 'prod' }}"]
     environment: ${{ github.event.inputs.environment || 'prod' }}
     steps:
-      - name: Run backup over SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ (github.event_name == 'schedule' || inputs.environment == 'prod') && '127.0.0.1' || secrets.SSH_HOST_DEV_PRIVATE }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            TARGET_ENV="${{ github.event.inputs.environment || 'prod' }}"
-            cd /opt/wp-stack/docker
-            mkdir -p ~/.oci
-            echo "${{ secrets.OCI_CLI_CONFIG }}" > ~/.oci/config
-            echo "${{ secrets.OCI_CLI_KEY }}" > ~/.oci/oci_api_key.pem
-            chmod 600 ~/.oci/oci_api_key.pem
+      - name: Run backup
+        shell: bash
+        env:
+          OCI_CLI_CONFIG: ${{ secrets.OCI_CLI_CONFIG }}
+          OCI_CLI_KEY: ${{ secrets.OCI_CLI_KEY }}
+        run: |
+          set -euo pipefail
+          cd /opt/wp-stack/docker
 
-            # Backups bucket + prefix are shared knowledge (docker/.env), but
-            # WHICH database/webroot to dump comes from that env's own file.
-            source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' "$TARGET_ENV.env")
-            source <(grep OCI_BACKUP_BUCKET .env)
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_CLI_CONFIG" > ~/.oci/config
+          printf '%s\n' "$OCI_CLI_KEY" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
 
-            docker compose --profile tools run --rm \
-              -v ~/.oci:/root/.oci:ro \
-              -e MYSQL_USER="$MYSQL_USER" \
-              -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
-              -e MYSQL_DATABASE="$MYSQL_DATABASE" \
-              -e MYSQL_HOST="db-$TARGET_ENV" \
-              -e WP_CONTENT_PATH="/var/www/$TARGET_ENV/wp-content" \
-              -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
-              -e OCI_BACKUP_PREFIX="$TARGET_ENV" \
-              backup
+          source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' app.env)
+          source <(grep OCI_BACKUP_BUCKET .env)
+
+          docker compose --profile tools run --rm \
+            -v ~/.oci:/root/.oci:ro \
+            -e MYSQL_USER="$MYSQL_USER" \
+            -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+            -e MYSQL_DATABASE="$MYSQL_DATABASE" \
+            -e MYSQL_HOST="db" \
+            -e WP_CONTENT_PATH="/var/www/html/wp-content" \
+            -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
+            -e OCI_BACKUP_PREFIX="prod" \
+            backup
