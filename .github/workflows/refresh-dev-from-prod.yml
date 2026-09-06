@@ -63,6 +63,7 @@ jobs:
             chmod 600 ~/.oci/oci_api_key.pem
             source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' dev.env)
             source <(grep OCI_BACKUP_BUCKET .env)
+            docker compose build backup
             PROD_HOST=$(grep -m1 '^PROD_HOST=' .env | cut -d= -f2-)
             DEV_HOST=$(grep -m1 '^DEV_HOST=' .env | cut -d= -f2-)
             docker compose --profile dev up -d db-dev

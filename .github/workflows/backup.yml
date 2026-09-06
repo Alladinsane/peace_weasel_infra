@@ -38,6 +38,8 @@ jobs:
           source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' app.env)
           source <(grep OCI_BACKUP_BUCKET .env)
 
+          docker compose build backup
+
           docker compose --profile tools run --rm \
             -v ~/.oci:/root/.oci:ro \
             -e MYSQL_USER="$MYSQL_USER" \

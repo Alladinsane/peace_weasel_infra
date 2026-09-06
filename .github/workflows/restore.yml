@@ -57,6 +57,8 @@ jobs:
           source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' app.env)
           source <(grep OCI_BACKUP_BUCKET .env)
 
+          docker compose build backup
+
           if [ "$VALIDATE_ONLY" != "true" ]; then
             docker compose stop php
             # A restore never overwrites its target without a fresh,
