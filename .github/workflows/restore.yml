@@ -84,6 +84,7 @@ jobs:
             -e OCI_BACKUP_BUCKET="$OCI_BACKUP_BUCKET" \
             -e OCI_BACKUP_PREFIX="prod" \
             -e RESTORE_STAMP="$RESTORE_STAMP" \
+            -e RESTORE_TARGET_ENV="prod" \
             -e VALIDATE_ONLY="$VALIDATE_ONLY" \
             backup
 
