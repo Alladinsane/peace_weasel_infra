@@ -54,19 +54,4 @@ jobs:
           printf '%s\n' "$CF_ORIGIN_KEY" > docker/nginx/certs/cloudflare-origin.key
           chmod 600 docker/nginx/certs/cloudflare-origin.key
 
-          cat > docker/app.env <<ENVEOF
-          MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
-          MYSQL_DATABASE=$MYSQL_DATABASE
-          MYSQL_USER=$MYSQL_USER
-          MYSQL_PASSWORD=$MYSQL_PASSWORD
-          WORDPRESS_DB_HOST=db
-          WORDPRESS_DB_NAME=$MYSQL_DATABASE
-          WORDPRESS_DB_USER=$MYSQL_USER
-          WORDPRESS_DB_PASSWORD=$MYSQL_PASSWORD
-          WORDPRESS_TABLE_PREFIX=$WORDPRESS_TABLE_PREFIX
-          ENVEOF
-
-          cd docker
-          docker compose build php
-          docker compose up -d db php nginx
-          docker compose --profile tools run --rm wp-cli cache flush --allow-root || true
+          cat > docker/app.env
