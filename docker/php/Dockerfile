@@ -8,3 +8,4 @@ RUN apk add --no-cache imagemagick imagemagick-dev \
     && docker-php-ext-enable opcache
 
 COPY php.ini /usr/local/etc/php/conf.d/zz-wp-tuning.ini
+COPY zz-docker-pool.conf /usr/local/etc/php-fpm.d/zz-docker-pool.conf
