@@ -25,3 +25,4 @@ output "dev_instance_private_ip" {
 output "dev_instance_ocid" {
   value = var.enable_dev_vm ? oci_core_instance.dev[0].id : null
 }
+
