@@ -1,47 +1,76 @@
-# Cloudflare Free plan gives you 5 "Custom Rules" (the free-tier WAF) — no
-# Managed Ruleset / OWASP Core Ruleset, which is Pro+ only. These rules cover
-# BOTH hosts (dev and prod share the same zone-level ruleset) — the IP-lock
-# and recon-path blocks apply regardless of which one is being hit.
-
 resource "cloudflare_ruleset" "wp_custom_waf" {
   zone_id     = var.zone_id
   name        = "wp-custom-waf"
-  description = "Free-tier custom WAF rules for WordPress (dev + prod)"
+  description = "Maximized Free-Tier WordPress + WooCommerce WAF"
   kind        = "zone"
   phase       = "http_request_firewall_custom"
 
+  # --------------------------------------------------------------------------
+  # RULE 1: Bypass / Allow Printify & Legitimate Webhooks
+  # Priority 1: Prevent false-positive blocks/challenges on store automation.
+  # --------------------------------------------------------------------------
   rules {
-    description = "Block wp-login/wp-admin except from admin IP, on either host"
+    description = "Allow Printify Webhooks and WooCommerce API calls"
+    expression  = "(starts_with(http.request.uri.path, \"/wp-json/wc/\") or starts_with(http.request.uri.path, \"/wc-api/\")) and (http.user_agent contains \"Printify\" or http.request.headers[\"authorization\"][0] ne \"\")"
+    action      = "skip"
+    action_parameters {
+      ruleset = "current"
+    }
+    enabled     = true
+
+    logging {
+      enabled = true
+    }
+  }
+
+  # --------------------------------------------------------------------------
+  # RULE 2: Lock wp-admin / wp-login to Admin IP
+  # --------------------------------------------------------------------------
+  rules {
+    description = "Block wp-login and wp-admin except from trusted admin IP"
     expression  = "(http.request.uri.path contains \"/wp-login.php\" or (http.request.uri.path contains \"/wp-admin\" and not http.request.uri.path contains \"/wp-admin/admin-ajax.php\")) and ip.src ne ${var.admin_ip}"
     action      = "block"
     enabled     = true
   }
 
+  # --------------------------------------------------------------------------
+  # RULE 3: Consolidated Exploit, Recon & Scraper Block
+  # Drops all known probe vectors in ONE rule so Nginx never sees them.
+  # --------------------------------------------------------------------------
   rules {
-    description = "Block common WP recon/exploit paths not otherwise in use"
-    expression  = "http.request.uri.path contains \"/xmlrpc.php\" or http.request.uri.path contains \"/wp-config.php\" or http.request.uri.path contains \"/.env\""
+    description = "Block exploits, uploads execution, recon, and user enumeration"
+    expression  = join(" or ", [
+      "http.request.uri.path contains \"/xmlrpc.php\"",
+      "http.request.uri.path contains \"/wp-config.php\"",
+      "http.request.uri.path contains \"/.env\"",
+      "http.request.uri.path contains \"/.git\"",
+      "(starts_with(lower(http.request.uri.path), \"/wp-content/uploads/\") and ends_with(lower(http.request.uri.path), \".php\"))",
+      "http.request.uri.query contains \"author=\"",
+      "starts_with(http.request.uri.path, \"/wp-json/wp/v2/users\")"
+    ])
     action      = "block"
     enabled     = true
   }
 
+  # --------------------------------------------------------------------------
+  # RULE 4: Managed Challenge on Untrusted Dynamic Spikes / Bad Threat Scores
+  # Cloudflare scores visitor threat levels (0-100). Catch automated headless browsers.
+  # --------------------------------------------------------------------------
   rules {
-    description = "Block PHP execution attempts from WordPress uploads"
-    expression  = "starts_with(lower(http.request.uri.path), \"/wp-content/uploads/\") and ends_with(lower(http.request.uri.path), \".php\")"
-    action      = "block"
+    description = "Challenge suspicious visitors and high threat scores on dynamic routes"
+    expression  = "cf.threat_score gt 14 and not starts_with(http.request.uri.path, \"/wp-content/\") and not starts_with(http.request.uri.path, \"/wp-includes/\")"
+    action      = "managed_challenge"
     enabled     = true
   }
 
+  # --------------------------------------------------------------------------
+  # RULE 5: Protect WooCommerce Cart / Checkout / Search Floods
+  # Attackers flood cart/search to exhaust PHP workers with heavy DB queries.
+  # --------------------------------------------------------------------------
   rules {
-    description = "Block unusual HTTP methods not used by WordPress"
-    expression  = "http.request.method in {\"CONNECT\" \"TRACE\" \"TRACK\"}"
-    action      = "block"
-    enabled     = true
-  }
-
-  rules {
-    description = "Block public WordPress user enumeration"
-    expression  = "http.request.uri.query contains \"author=\" or http.request.uri.path contains \"/wp-json/wp/v2/users\""
-    action      = "block"
+    description = "Challenge aggressive scrapers hitting WooCommerce dynamic queries"
+    expression  = "(http.request.uri.query contains \"s=\" or starts_with(http.request.uri.path, \"/cart\") or starts_with(http.request.uri.path, \"/checkout\")) and cf.client.bot"
+    action      = "managed_challenge"
     enabled     = true
   }
 }
