@@ -24,11 +24,17 @@ jobs:
       - name: Run backup
         shell: bash
         env:
+          BRANCH: ${{ (github.event.inputs.environment || 'prod') == 'prod' && 'main' || 'dev' }}
           OCI_CLI_CONFIG: ${{ secrets.OCI_CLI_CONFIG }}
           OCI_CLI_KEY: ${{ secrets.OCI_CLI_KEY }}
         run: |
           set -euo pipefail
-          cd /opt/wp-stack/docker
+          cd /opt/wp-stack
+          git fetch origin
+          git checkout "$BRANCH"
+          git pull --ff-only origin "$BRANCH"
+
+          cd docker
 
           mkdir -p ~/.oci
           printf '%s\n' "$OCI_CLI_CONFIG" > ~/.oci/config
@@ -38,7 +44,8 @@ jobs:
           source <(grep -E '^(MYSQL_USER|MYSQL_PASSWORD|MYSQL_DATABASE)=' app.env)
           source <(grep OCI_BACKUP_BUCKET .env)
 
-          docker compose build backup
+          # Force rebuild without stale cached layers
+          docker compose build --no-cache --pull backup
 
           docker compose --profile tools run --rm \
             -v ~/.oci:/root/.oci:ro \
