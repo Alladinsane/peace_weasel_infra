@@ -12,7 +12,7 @@ resource "cloudflare_ruleset" "wp_custom_waf" {
 
   rules {
     description = "Block wp-login/wp-admin except from admin IP, on either host"
-    expression  = "(http.request.uri.path contains \"/wp-login.php\" or http.request.uri.path contains \"/wp-admin\") and ip.src ne ${var.admin_ip}"
+    expression  = "(http.request.uri.path contains \"/wp-login.php\" or (http.request.uri.path contains \"/wp-admin\" and not http.request.uri.path contains \"/wp-admin/admin-ajax.php\")) and ip.src ne ${var.admin_ip}"
     action      = "block"
     enabled     = true
   }
