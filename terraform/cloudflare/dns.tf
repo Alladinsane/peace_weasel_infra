@@ -29,3 +29,4 @@ resource "cloudflare_record" "dev" {
   ttl     = 1
   comment = "wp-oci-free-stack: separately managed dev host"
 }
+
