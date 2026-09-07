@@ -23,12 +23,6 @@ resource "oci_core_route_table" "this" {
   }
 }
 
-# Security list is intentionally tight:
-#  - 80/443 open to the world, but nginx behind it only trusts Cloudflare's
-#    IP ranges for the real client IP (see docker/nginx/conf.d/security.conf) —
-#    origin IP itself should also be locked to Cloudflare via this list once
-#    you're confident DNS is fully cut over (see docs/ARCHITECTURE.md).
-#  - 22 restricted to var.admin_ssh_cidr only, never 0.0.0.0/0.
 resource "oci_core_security_list" "this" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.this.id
@@ -39,24 +33,7 @@ resource "oci_core_security_list" "this" {
     protocol    = "all"
   }
 
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 80
-      max = 80
-    }
-  }
-
-  ingress_security_rules {
-    protocol = "6"
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 443
-      max = 443
-    }
-  }
-
+  # --- SSH Management ---
   ingress_security_rules {
     protocol = "6"
     source   = var.admin_ssh_cidr
@@ -72,6 +49,32 @@ resource "oci_core_security_list" "this" {
     tcp_options {
       min = 22
       max = 22
+    }
+  }
+
+  # --- HTTP (80) ONLY from Cloudflare Edge ---
+  dynamic "ingress_security_rules" {
+    for_each = var.cloudflare_ipv4_cidrs
+    content {
+      protocol = "6"
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 80
+        max = 80
+      }
+    }
+  }
+
+  # --- HTTPS (443) ONLY from Cloudflare Edge ---
+  dynamic "ingress_security_rules" {
+    for_each = var.cloudflare_ipv4_cidrs
+    content {
+      protocol = "6"
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 443
+        max = 443
+      }
     }
   }
 }

@@ -30,6 +30,7 @@ resource "oci_core_instance" "prod" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.this.id
     assign_public_ip = true
+    nsg_ids          = [oci_core_network_security_group.web_origin.id]
   }
 
   metadata = {
@@ -53,6 +54,10 @@ resource "oci_core_instance" "prod" {
 
   lifecycle {
     prevent_destroy = true
+    ignore_changes = [
+      metadata["user_data"],
+      source_details,
+    ]
   }
 }
 
@@ -77,6 +82,7 @@ resource "oci_core_instance" "dev" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.this.id
     assign_public_ip = true
+    nsg_ids          = [oci_core_network_security_group.web_origin.id]
   }
 
   metadata = {

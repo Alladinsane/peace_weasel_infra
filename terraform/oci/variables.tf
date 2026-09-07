@@ -1,9 +1,33 @@
-variable "tenancy_ocid" {}
-variable "user_ocid" {}
-variable "fingerprint" {}
-variable "private_key_path" {}
-variable "region" { default = "us-chicago-1" }
-variable "compartment_ocid" {}
+variable "tenancy_ocid" {
+  type        = string
+  description = "OCID of the tenancy."
+}
+
+variable "user_ocid" {
+  type        = string
+  description = "OCID of the user calling OCI APIs."
+}
+
+variable "fingerprint" {
+  type        = string
+  description = "Fingerprint for the OCI API private key."
+}
+
+variable "private_key_path" {
+  type        = string
+  description = "Path to the OCI API private key file."
+}
+
+variable "region" {
+  type        = string
+  default     = "us-chicago-1"
+  description = "OCI region."
+}
+
+variable "compartment_ocid" {
+  type        = string
+  description = "OCID of the compartment hosting the resources."
+}
 
 variable "enable_dev_vm" {
   description = "Create the separate dev VM. Disable to destroy dev while preserving production."
@@ -22,6 +46,28 @@ variable "availability_domain_index" {
   }
 }
 
+# Cloudflare IP ranges for security list rules
+variable "cloudflare_ipv4_cidrs" {
+  description = "List of Cloudflare IPv4 CIDRs allowed to access HTTP/HTTPS."
+  type        = list(string)
+  default = [
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/12",
+    "172.64.0.0/13",
+    "131.0.72.0/22"
+  ]
+}
+
 # Production is persistent and dev is an optional separate instance. The
 # shared VCN/subnet is managed once; the A1 pool check covers both instances.
 variable "ssh_public_key" {
@@ -30,8 +76,9 @@ variable "ssh_public_key" {
 }
 
 variable "instance_ocpus" {
-  type    = number
-  default = 1 # production allocation while optional dev is enabled
+  description = "Production VM OCPU allocation."
+  type        = number
+  default     = 1
 
   validation {
     condition     = var.instance_ocpus > 0 && var.instance_ocpus <= 2 && var.instance_ocpus == floor(var.instance_ocpus)
@@ -40,8 +87,9 @@ variable "instance_ocpus" {
 }
 
 variable "instance_memory_gb" {
-  type    = number
-  default = 6
+  description = "Production VM memory allocation in GB."
+  type        = number
+  default     = 6
 
   validation {
     condition     = var.instance_memory_gb > 0 && var.instance_memory_gb <= 12
@@ -89,6 +137,7 @@ variable "git_repo_url" {
 }
 
 variable "git_repo_branch" {
-  type    = string
-  default = "main"
+  description = "Git branch to check out on initialization."
+  type        = string
+  default     = "main"
 }
