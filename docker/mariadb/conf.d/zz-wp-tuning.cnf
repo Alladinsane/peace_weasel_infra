@@ -1,0 +1,51 @@
+[mysqld]
+# ----------------------------------------------------------------------
+# 1. Memory & Buffer Pool (Tuned for 2G Container Limit)
+# ----------------------------------------------------------------------
+# Target: Keep global buffers ~1.1G - 1.2G, leaving ~800M for per-thread buffers + OS overhead
+default_storage_engine          = InnoDB
+innodb_buffer_pool_size         = 1G
+innodb_buffer_pool_instances     = 1
+innodb_log_file_size            = 128M
+innodb_log_buffer_size          = 16M
+
+# ----------------------------------------------------------------------
+# 2. Connection & Thread Limits (Hard Boundary)
+# ----------------------------------------------------------------------
+# You capped PHP-FPM at 5 workers. 20 DB connections gives plenty of headroom
+# for 5 web requests + WP-CLI + backup jobs without allowing memory explosions.
+max_connections                 = 25
+max_connect_errors              = 1000
+connect_timeout                 = 10
+wait_timeout                    = 60
+interactive_timeout             = 60
+
+# Per-thread buffers (keep lean: 25 connections * ~5MB = ~125MB peak thread RAM)
+sort_buffer_size                = 2M
+read_buffer_size                = 1M
+read_rnd_buffer_size            = 1M
+join_buffer_size                = 2M
+thread_stack                    = 256K
+
+# ----------------------------------------------------------------------
+# 3. I/O & Disk Performance (Conserves OCI Volume IOPS & 0.65 CPU)
+# ----------------------------------------------------------------------
+# 2 = write to OS cache at commit, flush to disk every 1s.
+# Drastically reduces disk write contention for WooCommerce checkout/cart writes.
+innodb_flush_log_at_trx_commit  = 2
+innodb_flush_method             = O_DIRECT
+innodb_file_per_table           = 1
+
+# Temporary tables in memory before spilling to disk
+tmp_table_size                  = 32M
+max_heap_table_size             = 32M
+
+# ----------------------------------------------------------------------
+# 4. Hardening & Surface Minimization
+# ----------------------------------------------------------------------
+# Prevent DNS reverse-lookups on incoming connections from the php container
+skip_name_resolve               = 1
+
+# Restrict local filesystem interactions from SQL injection vectors
+local_infile                    = 0
+symbolic_links                  = 0

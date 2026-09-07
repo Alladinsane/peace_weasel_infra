@@ -19,6 +19,7 @@ services:
     env_file: app.env
     volumes:
       - db_data:/var/lib/mysql
+      - ./mariadb/conf.d:/etc/mysql/conf.d:ro
     networks: [wpnet]
 
   php:
