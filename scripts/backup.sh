@@ -35,9 +35,9 @@ tar -tzf "$OUT_DIR/wp-content.tar.gz" >/dev/null
 PREFIX="$OCI_BACKUP_PREFIX/$STAMP"
 echo "Uploading to oci://$OCI_BACKUP_BUCKET/$PREFIX/ ..."
 oci os object put --bucket-name "$OCI_BACKUP_BUCKET" --file "$OUT_DIR/db.sql.gz" \
-  --name "$PREFIX/db.sql.gz" --no-progress-bar
+  --name "$PREFIX/db.sql.gz" 
 oci os object put --bucket-name "$OCI_BACKUP_BUCKET" --file "$OUT_DIR/wp-content.tar.gz" \
-  --name "$PREFIX/wp-content.tar.gz" --no-progress-bar
+  --name "$PREFIX/wp-content.tar.gz"
 oci os object head --bucket-name "$OCI_BACKUP_BUCKET" --name "$PREFIX/db.sql.gz" >/dev/null
 oci os object head --bucket-name "$OCI_BACKUP_BUCKET" --name "$PREFIX/wp-content.tar.gz" >/dev/null
 
