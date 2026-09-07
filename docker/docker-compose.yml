@@ -98,6 +98,7 @@ services:
     entrypoint: ["wp", "--path=/var/www/html", "--allow-root"]
     volumes:
       - wp_data:/var/www/html
+       - ./php/php.ini:/usr/local/etc/php/conf.d/zz-wp-tuning.ini:ro
     networks: [wpnet]
 
 networks:
