@@ -6,6 +6,8 @@
 .terraform/
 .terraform.lock.hcl
 *.backend.hcl
+tfplan
+*.tfplan
 
 # Secrets / keys / certs
 .env

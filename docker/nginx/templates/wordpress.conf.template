@@ -22,7 +22,37 @@ server {
         try_files $uri $uri/ /index.php?$args;
     }
 
+    # 1. Allow admin-ajax.php for plugins / storefront AJAX / Printify callbacks
+    location = /wp-admin/admin-ajax.php {
+        try_files $uri =404;
+        fastcgi_pass php:9000;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_read_timeout 120s;
+        fastcgi_send_timeout 120s;
+    }
+
+    # 2. IP-restricted wp-admin / wp-login with nested FastCGI execution
+    location ~* ^/(wp-login\.php|wp-admin) {
+        allow ${NGINX_ADMIN_IP};
+        deny all;
+
         location ~ \.php$ {
+            try_files $uri =404;
+            fastcgi_pass php:9000;
+            fastcgi_index index.php;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_read_timeout 120s;
+            fastcgi_send_timeout 120s;
+            fastcgi_buffers 16 16k;
+            fastcgi_buffer_size 32k;
+        }
+    }
+
+    # 3. Standard FastCGI handler (REST API, frontend, webhooks)
+    location ~ \.php$ {
+        try_files $uri =404;
         fastcgi_pass php:9000;
         fastcgi_index index.php;
         include fastcgi_params;
@@ -31,11 +61,6 @@ server {
         fastcgi_send_timeout 120s;
         fastcgi_buffers 16 16k;
         fastcgi_buffer_size 32k;
-    }
-
-    location ~* ^/(wp-login\.php|wp-admin) {
-        allow ${NGINX_ADMIN_IP};
-        deny all;
     }
 
     location ~* \.(log|ini|sh)$ { deny all; }
