@@ -69,6 +69,17 @@ jobs:
           cd docker
           docker compose build php backup
           docker compose up -d --force-recreate --remove-orphans nginx db php
+          for attempt in {1..30}; do
+            if docker compose exec -T db mariadb-admin ping -h localhost -u root "-p$MYSQL_ROOT_PASSWORD" --silent; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "MariaDB did not become ready in time." >&2
+              docker compose logs --tail=100 db >&2
+              exit 1
+            fi
+            sleep 2
+          done
           docker compose --profile tools run --rm wp-cli option update home "https://$APP_HOST" --quiet || true
           docker compose --profile tools run --rm wp-cli option update siteurl "https://$APP_HOST" --quiet || true
           docker compose --profile tools run --rm wp-cli cache flush --allow-root || true
