@@ -10,6 +10,20 @@ server {
 }
 
 # ----------------------------------------------------------------------
+# www is a DNS/cert alias only; always redirect to the canonical APP_HOST.
+# ----------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name www.${APP_HOST};
+
+    ssl_certificate     /etc/nginx/certs/cloudflare-origin.pem;
+    ssl_certificate_key /etc/nginx/certs/cloudflare-origin.key;
+
+    return 301 https://${APP_HOST}$request_uri;
+}
+
+# ----------------------------------------------------------------------
 # 2. Main HTTPS Server Block
 # ----------------------------------------------------------------------
 server {
