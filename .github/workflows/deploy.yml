@@ -69,4 +69,6 @@ jobs:
           cd docker
           docker compose build php backup
           docker compose up -d --force-recreate --remove-orphans nginx db php
+          docker compose --profile tools run --rm wp-cli option update home "https://$APP_HOST" --quiet || true
+          docker compose --profile tools run --rm wp-cli option update siteurl "https://$APP_HOST" --quiet || true
           docker compose --profile tools run --rm wp-cli cache flush --allow-root || true
